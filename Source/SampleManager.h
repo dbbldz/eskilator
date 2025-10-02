@@ -64,10 +64,7 @@ public:
     
     // Get current sample rate
     double getSampleRate() const { return currentSampleRate; }
-    
-    // Set callback for when sample needs timestretch update
-    void setTimestretchUpdateCallback(std::function<void()> callback) { onTimestretchUpdate = callback; }
-    
+
     // Sample bank management
     int getSampleCount() const { return static_cast<int>(sampleBank.size()); }
     void removeSample(int index);
@@ -122,9 +119,7 @@ private:
     // Cache for randomization decision (to prevent rapid switching within a single trigger)
     mutable int cachedSampleIndex = -1;
     mutable bool randomizationDecisionMade = false;
-    
-    std::function<void()> onTimestretchUpdate;
-    
+
     // Thread safety for sample bank modifications
     mutable std::mutex sampleBankMutex;
     
@@ -136,11 +131,7 @@ private:
     
     // Internal version without mutex lock (for use within already-locked methods)
     int getCurrentSampleIndexInternal() const;
-    
-    void updateSampleInfo(const juce::String& name, const juce::String& path, double sampleRate);
-    
-    void triggerTimestretchUpdate();
-    
+
     // Initialize random generator
     void initializeRandomGenerator();
 };

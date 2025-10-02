@@ -167,9 +167,6 @@ PluginEditor::PluginEditor(GliderAudioProcessor& p)
     glideStepsLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(glideStepsLabel);
 
-    
-
-    
     // Create parameter attachments
     auto& apvts = audioProcessor.getAPVTS();
     attackAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "attack", attackSlider);

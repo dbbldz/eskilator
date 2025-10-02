@@ -107,7 +107,6 @@ bool SampleManager::loadSample(const juce::File& audioFile, double currentSample
         delete reader;
         
         // Trigger timestretch update for the new sample
-        triggerTimestretchUpdate();
         
         return true;
     }
@@ -176,8 +175,7 @@ bool SampleManager::loadDefaultSample(double currentSampleRate)
                 }
                 
                 // Trigger timestretch update for the new sample
-                triggerTimestretchUpdate();
-                
+                        
                 return true;
             }
         }
@@ -391,15 +389,3 @@ bool SampleManager::performSampleRateConversion(const juce::AudioBuffer<float>& 
     return true;
 }
 
-void SampleManager::updateSampleInfo(const juce::String& name, const juce::String& path, double sampleRate)
-{
-    // This method is no longer used in the new implementation
-    // Sample info is now stored in the SampleInfo struct
-}
-
-void SampleManager::triggerTimestretchUpdate()
-{
-    if (onTimestretchUpdate) {
-        onTimestretchUpdate();
-    }
-}
