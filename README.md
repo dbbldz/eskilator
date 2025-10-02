@@ -59,11 +59,33 @@ cmake --build . --config Release
 
 ### Installation
 
+#### Building from Source
 The `build_and_install.sh` script automatically installs plugins to:
 - **macOS AU**: `~/Library/Audio/Plug-Ins/Components/`
 - **macOS VST3**: `~/Library/Audio/Plug-Ins/VST3/`
 
-You may need to restart your DAW for the new plugins to appear.
+#### Installing Pre-built Plugins (macOS)
+
+**Note**: These plugins are not signed with an Apple Developer certificate. You'll need to bypass Gatekeeper:
+
+1. Download the plugin files (`.component` for AU or `.vst3` for VST3)
+2. Move them to your plugins folder:
+   - **AU**: `~/Library/Audio/Plug-Ins/Components/`
+   - **VST3**: `~/Library/Audio/Plug-Ins/VST3/`
+3. Open your DAW and try to scan plugins
+4. If the plugin doesn't appear, open **System Preferences → Privacy & Security**
+5. Look for a message about "Eskilator" being blocked
+6. Click **"Open Anyway"** next to the blocked plugin message
+7. Rescan plugins in your DAW
+
+**Alternative method** (if the above doesn't work):
+```bash
+# Remove the quarantine flag from the plugin
+xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/Eskilator.component
+xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/Eskilator.vst3
+```
+
+You may need to restart your DAW for the plugins to appear.
 
 ## Usage
 

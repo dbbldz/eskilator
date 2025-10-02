@@ -4,6 +4,9 @@ build-*/
 out/
 cmake-build-*/
 
+# Release packages
+releases/
+
 # JUCE framework (should be cloned separately)
 JUCE/
 
