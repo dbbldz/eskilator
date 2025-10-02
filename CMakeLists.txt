@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(HelloWorldVST3)
+project(Eskilator)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
@@ -8,72 +8,82 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Add JUCE as a subdirectory
 add_subdirectory(JUCE)
 
-# Create the VST3 plugin
-juce_add_plugin(HelloWorldVST3
+# Create the plugin
+juce_add_plugin(Eskilator
     VERSION "1.0.0"
-    COMPANY_NAME "YourCompany"
-    COMPANY_WEBSITE "https://yourcompany.com"
-    COMPANY_EMAIL "contact@yourcompany.com"
-    PRODUCT_NAME "Beat Generator v2"
-    PRODUCT_DESCRIPTION "A MIDI beat generator that outputs C notes on every beat"
-    PRODUCT_WEBSITE "https://yourcompany.com/helloworld"
-    PRODUCT_HELP_URL "https://yourcompany.com/helloworld/help"
-    COMPANY_LEGAL_NAME "Your Company Name"
-    COMPANY_CODE "YCOM"
-    PRODUCT_CODE "Hwld"
-    VST3_CATEGORIES "Synth"
+    COMPANY_NAME "Rare Earth Tones"
+    COMPANY_WEBSITE "https://github.com/dbbldz/eskilator"
+    COMPANY_EMAIL "dutchdubs@gmail.com"
+    PRODUCT_NAME "Eskilator"
+    PRODUCT_DESCRIPTION "Monophonic sampler with Triton-inspired stepped portamento glide effect."
+    PRODUCT_WEBSITE "https://github.com/dbbldz/eskilator"
+    PRODUCT_HELP_URL "https://github.com/dbbldz/eskilator"
+    COMPANY_LEGAL_NAME "Rare Earth Tones"
+    COMPANY_CODE "MGLA"
+    PRODUCT_CODE "Eski"
+    BUNDLE_ID "com.marcglasser.eskilator"
+    VST3_CATEGORIES "Instrument|Sampler"
     AU_MAIN_TYPE "kAudioUnitType_MusicDevice"
     AU_SANDBOX_SAFE true
     FORMATS AU VST3 Standalone
-    PRODUCT_ID "hwld1234"
-    MANUFACTURER_CODE "YCOM"
-    MANUFACTURER_NAME "YourCompany"
+    PRODUCT_ID "eski1234"
+    MANUFACTURER_CODE "RETN"
+    MANUFACTURER_NAME "Rare Earth Tones"
     NEEDS_AUDIO_INPUT FALSE
     NEEDS_AUDIO_OUTPUT TRUE
     IS_MIDI_EFFECT FALSE
     IS_SYNTH TRUE
-    WANTS_MIDI_INPUT TRUE
-    PRODUCES_MIDI_OUTPUT TRUE
+    NEEDS_MIDI_INPUT TRUE
+    PRODUCES_MIDI_OUTPUT FALSE
 )
 
 # Configure JUCE to generate JuceHeader.h
-juce_generate_juce_header(HelloWorldVST3)
+juce_generate_juce_header(Eskilator)
 
 # Enable plugin copy step so it gets installed automatically
-set_target_properties(HelloWorldVST3_VST3 PROPERTIES
+set_target_properties(Eskilator_VST3 PROPERTIES
     JUCE_ENABLE_PLUGIN_COPY_STEP ON
 )
 
 # Set source files
-target_sources(HelloWorldVST3
+target_sources(Eskilator
     PRIVATE
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp
+        Source/PluginLogger.cpp
+        Source/ParameterManager.cpp
+        Source/SampleManager.cpp
+        Source/StyleSheet.cpp
         Source/PluginProcessor.h
         Source/PluginEditor.h
-)
-
-# Add binary data (embed the click sample)
-juce_add_binary_data(HelloWorldVST3_BinaryData
-    SOURCES
-        "Click 808.wav"
+        Source/PluginLogger.h
+        Source/ParameterManager.h
+        Source/SampleManager.h
+        Source/StyleSheet.h
 )
 
 # Set include directories
-target_include_directories(HelloWorldVST3
+target_include_directories(Eskilator
     PRIVATE
         Source
+        ${CMAKE_CURRENT_BINARY_DIR}/juce_binarydata_Eskilator_BinaryData/JuceLibraryCode
 )
 
-# Link required JUCE modules
-target_link_libraries(HelloWorldVST3 PRIVATE
+# Add binary data directly to the main target
+juce_add_binary_data(Eskilator_BinaryData
+    SOURCES
+        DefaultSample.wav
+)
+
+# Link required JUCE modules and binary data
+target_link_libraries(Eskilator PRIVATE
     juce::juce_audio_utils
     juce::juce_audio_devices
-    HelloWorldVST3_BinaryData
+    Eskilator_BinaryData
 )
 
 # Set compile definitions
-target_compile_definitions(HelloWorldVST3
+target_compile_definitions(Eskilator
     PRIVATE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0

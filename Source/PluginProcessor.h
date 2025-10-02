@@ -1,12 +1,21 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <functional>
+#include "PluginLogger.h"
+#include "SampleManager.h"
+#include "ParameterManager.h"
 
-class HelloWorldVST3AudioProcessor : public juce::AudioProcessor
+class GliderAudioProcessor : public juce::AudioProcessor,
+                                     private juce::AudioProcessorValueTreeState::Listener
 {
 public:
-    HelloWorldVST3AudioProcessor();
-    ~HelloWorldVST3AudioProcessor() override;
+
+    GliderAudioProcessor();
+    ~GliderAudioProcessor() override;
+    
+    // Logger instance
+    PluginLogger logger;
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
@@ -23,6 +32,7 @@ public:
     bool acceptsMidi() const override;
     bool producesMidi() const override;
     bool isMidiEffect() const override;
+    bool isSynth() const;
     double getTailLengthSeconds() const override;
 
     int getNumPrograms() override;
@@ -34,63 +44,78 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
     
-    // Step sequencer functionality
-    void setStepActive(int stepIndex, bool isActive);
-    bool isStepActive(int stepIndex) const;
+    // Modern parameter management with APVTS
+    juce::AudioProcessorValueTreeState& getAPVTS() { return parameterManager.getAPVTS(); }
+    static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     
     // Sample loading functionality
     void loadSample(const juce::File& audioFile);
-    void loadDefaultClickSample();
-    bool hasSample() const { return sampleBuffer.getNumSamples() > 0; }
-    juce::String getSampleName() const { return currentSampleName; }
+    void loadDefaultSample(double sampleRate);
+    bool hasSample() const { return sampleManager.hasSample(); }
+    juce::String getSampleName(int index = 0) const { return sampleManager.getSampleName(index); }
+    double getOriginalSampleRate() const { return sampleManager.getOriginalSampleRate(); }
     
-    // ADSR envelope controls
-    void setAttack(float attackTime) { attackTimeSeconds = attackTime; }
-    void setDecay(float decayTime) { decayTimeSeconds = decayTime; }
-    void setSustain(float sustainLevel) { sustainLevelNormalized = sustainLevel; }
-    void setRelease(float releaseTime) { releaseTimeSeconds = releaseTime; }
+    // Sample bank management
+    int getSampleCount() const { return sampleManager.getSampleCount(); }
+    void removeSample(int index);
+    void clearSampleBank();
     
-    float getAttack() const { return attackTimeSeconds; }
-    float getDecay() const { return decayTimeSeconds; }
-    float getSustain() const { return sustainLevelNormalized; }
-    float getRelease() const { return releaseTimeSeconds; }
+    // Per-sample parameter management
+    void setSampleGain(int index, float gainDb) { sampleManager.setSampleGain(index, gainDb); }
+    float getSampleGain(int index) const { return sampleManager.getSampleGain(index); }
+    void setSampleTranspose(int index, float semitones) { sampleManager.setSampleTranspose(index, semitones); }
+    float getSampleTranspose(int index) const { return sampleManager.getSampleTranspose(index); }
     
-    // Step sequencer timing information
-    int getLastTriggeredStep() const { return lastTriggeredStep; }
-    double getLastTriggeredStepTime() const { return lastTriggeredStepTime; }
+    // Get current sample information
+    int getCurrentSampleIndex() const { return sampleManager.getCurrentSampleIndex(); }
+    juce::String getCurrentSampleName() const;
+    double getSampleDuration(int index = 0) const; // Get duration in seconds
+    const juce::AudioBuffer<float>* getSampleBufferForDisplay(int index = 0) const;
+    
+    // State change callback
+    std::function<void()> onStateRestored;
+    
+    // Set state restored callback
+    void setStateRestoredCallback(std::function<void()> callback) { onStateRestored = callback; }
+    
+    // Try to reload sample from path
+    bool reloadSampleFromPath();
+    
+    // ADSR envelope controls - now use atomic parameter access
+    float getAttack() const { return parameterManager.getAttack(); }
+    float getDecay() const { return parameterManager.getDecay(); }
+    float getSustain() const { return parameterManager.getSustain(); }
+    float getRelease() const { return parameterManager.getRelease(); }
+    
+    // Sample volume gain control - now use atomic parameter access
+    float getSampleGain() const { return parameterManager.getSampleGain(); }
+
+    // Voice count control
+    int getVoiceCount() const { return parameterManager.getVoiceCount(); }
+    
+    // Glide controls
+    float getGlideTime() const { return parameterManager.getGlideTime(); }
+    int getGlideSteps() const { return parameterManager.getGlideSteps(); }
+    
+    // Get current sample rate
+    double getSampleRate() const { return currentSampleRate; }
+    
+
+    
+    // Voice management methods
+    int allocateVoice(); // Returns voice index, with proper voice stealing
+    void startVoice(int voiceIndex, float velocity, float pitch = 0.0f); // Start a voice with current sample and velocity
+
+    // AudioProcessorValueTreeState::Listener implementation
+    void parameterChanged(const juce::String& parameterID, float newValue) override;
 
 private:
-    // Precise timing system
-    struct TimingEvent
-    {
-        int sampleOffset;      // Sample offset within the buffer
-        int stepNumber;        // Which step to trigger
-        double preciseTime;    // Precise time in samples (can be fractional)
-        bool isProcessed;      // Whether this event has been processed
-    };
-    
-    // Timing queue for sample-accurate scheduling
-    std::vector<TimingEvent> timingQueue;
-    double lastProcessedTime = 0.0;
-    double currentBufferStartTime = 0.0;
-    
-    // Global timing state to prevent duplicates and track timing across buffers
-    double lastTriggeredStepTime = -1.0;
-    int lastTriggeredStep = -1;
-    double lastTriggeredStepPPQ = -1.0;  // Track PPQ position for host sync
-    double globalTimingOffset = 0.0;
-    
-    // Host timing state
-    double lastHostTime = 0.0;
-    double hostTimeOffset = 0.0;
-    bool hostTimingValid = false;
-    double lastBPM = 0.0;
-    
-    // MIDI Clock synchronization variables
-    int midiClockCounter = 0;       // Counts MIDI clock pulses (24 per quarter note)
-    bool isTransportRunning = false;
-    bool shouldGenerateBeat = false;
-    int lastBeatClock = -1;
+    // Sample-accurate audio rendering
+    void renderAudioSegment(juce::AudioBuffer<float>& buffer, int startSample, int endSample);
+
+
+    // Modern parameter management
+    ParameterManager parameterManager;
     
     // Audio synthesis variables
     bool noteIsPlaying = false;
@@ -98,17 +123,12 @@ private:
     int noteStartSample = 0; // Track when within the buffer the note should start
     double currentSampleRate = 44100.0; // Store sample rate for AU compatibility
     
-    // ADSR envelope state
+    // ADSR envelope state (legacy enum kept for compatibility)
     enum class EnvelopeState { Idle, Attack, Decay, Sustain, Release };
     
-    // Step sequencer state
-    std::array<bool, 16> stepActive = {{false, false, false, false, false, false, false, false,
-                                       false, false, false, false, false, false, false, false}}; // All steps disabled by default
+    SampleManager sampleManager;
     
-    // Sample playback
-    juce::AudioBuffer<float> sampleBuffer;
-    int samplePosition = 0;
-    juce::String currentSampleName;
+    std::atomic<bool> isPluginReady{false};
     
     // Multiple sample voices for overlapping playback
     struct SampleVoice
@@ -119,10 +139,54 @@ private:
         float currentEnvelopeValue = 0.0f;
         int envelopeSampleCounter = 0;
         bool isActive = false;
+        juce::uint64 voiceStartTime = 0; // For voice stealing - track when voice started
+        float velocity = 1.0f; // Velocity value for this voice (0.0 to 1.0)
+        float pitch = 0.0f; // Pitch value for this voice (-12.0 to +12.0 semitones)
+        float cachedPitchRatio = 0.0f; // Cache pitch ratio to avoid repeated std::pow() calls
+        float releaseMultiplier = 0.0f; // Cached release multiplier for smooth fadeouts
+        
+        // Voice stealing crossfade
+        bool isBeingStolen = false; // Whether this voice is being faded out due to stealing
+        float stolenFadeOutValue = 1.0f; // Fadeout multiplier for stolen voices
+        int stolenFadeOutSamples = 0; // Counter for stolen voice fadeout
+        int stolenFadeOutDuration = 512; // Duration in samples for stolen voice fadeout (~11.6ms at 44.1kHz)
+        
+        // Glide state for stepped portamento
+        bool isGliding = false;           // Whether this voice is currently gliding
+        float glideStartPitch = 0.0f;     // Starting pitch for glide
+        float glideTargetPitch = 0.0f;    // Target pitch for glide
+        int glideCurrentStep = 0;         // Current step in the glide process
+        int glideTotalSteps = 0;          // Total number of steps for the glide
+        int glideSamplesPerStep = 0;      // Samples per step
+        int glideSampleCounter = 0;       // Counter for current step duration
+
+        // Phase continuity for stepped portamento (prevents clicks)
+        double phaseAccumulator = 0.0;  // Continuous phase position for sample reading
+
+        // Glide crossfade state (prevents clicks when restarting sample)
+        bool isInGlideCrossfade = false;       // Whether voice is crossfading at glide start
+        int glideCrossfadeSampleCount = 0;     // Counter for crossfade progress
+        double glideOldPhaseAccumulator = 0.0; // Old phase position to crossfade from
+        float glideOldPitchRatio = 0.0f;       // Old pitch ratio for old position playback
+        static constexpr int GLIDE_CROSSFADE_LENGTH = 256; // ~5.8ms at 44.1kHz (increased from 64)
+
+        // ADSR envelope using JUCE's built-in class
+        juce::ADSR adsr;  // Exponential envelope with proper legato support
     };
     
-    static constexpr int MAX_VOICES = 8; // Allow up to 8 overlapping samples
+    static constexpr int MAX_VOICES = 64; // Allow up to 64 overlapping samples (like vst-test2)
     std::array<SampleVoice, MAX_VOICES> sampleVoices;
+    juce::uint64 voiceAllocationCounter = 0; // For tracking voice allocation order
+    
+    // All parameters are now managed by APVTS
+    
+    // Parameter update callback
+    void updateParametersFromUI();
+    
+    // ADSR envelope state (legacy - now handled per voice)
+    EnvelopeState currentEnvelopeState = EnvelopeState::Idle;
+    float currentEnvelopeValue = 0.0f;
+    int envelopeSampleCounter = 0;
     
     // ADSR envelope parameters
     float attackTimeSeconds = 0.01f;      // 10ms default
@@ -130,29 +194,17 @@ private:
     float sustainLevelNormalized = 0.7f;  // 70% default
     float releaseTimeSeconds = 0.1f;      // 100ms default
     
-    // Timing precision configuration
-    int timingPrecisionSamples = 1;       // Sample-accurate timing by default
+    // Sample volume gain control
+    float sampleGainDb = -6.0f; // Default gain
     
-    // ADSR envelope state (legacy - now handled per voice)
-    EnvelopeState currentEnvelopeState = EnvelopeState::Idle;
-    float currentEnvelopeValue = 0.0f;
-    int envelopeSampleCounter = 0;
+    // Glide state for monophonic mode
+    float lastMonophonicPitch = 0.0f;     // Last pitch used in monophonic mode
+    bool hasLastPitch = false;            // Whether we have a previous pitch to glide from
     
-    // Private timing methods
-    void updateHostTiming(const juce::AudioPlayHead::CurrentPositionInfo& posInfo);
-    void scheduleTimingEvents(double bufferStartTime, double bufferDuration, double bpm, int actualBufferSamples);
-    void processTimingEvents(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages);
-    double getPreciseTimeFromHost(const juce::AudioPlayHead::CurrentPositionInfo& posInfo);
-    void clearTimingQueue();
+    // Bus layout configuration
+    static juce::AudioProcessor::BusesProperties getBusesLayout();
     
-    // Timing configuration
-    void setTimingPrecision(int samples) { timingPrecisionSamples = samples; }
-    int getTimingPrecision() const { return timingPrecisionSamples; }
-    void calibrateTiming(double bpm);
-    
-    // Debug timing information
-    int getQueuedEventsCount() const { return static_cast<int>(timingQueue.size()); }
-    double getLastHostTime() const { return lastHostTime; }
-    
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(HelloWorldVST3AudioProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(GliderAudioProcessor)
 };
+
+

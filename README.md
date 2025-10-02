@@ -1,73 +1,132 @@
-# Hello World VST3 Plugin
+# Eskilator
 
-A simple VST3 plugin built with JUCE that displays "Hello World" text in its GUI.
+A monophonic sampler with stepped portamento glide inspired by the KORG Triton.
+
+## Overview
+
+Eskilator is a VST3/AU/Standalone sampler plugin built with JUCE. It recreates the KORG Triton's stepped glide effect - where pitch transitions happen in discrete steps rather than smoothly. Load your own samples and adjust the glide time and step count to dial in the sound.
 
 ## Features
 
-- VST3 format support
-- AudioUnit (AU) support for macOS
-- Standalone application
-- Simple pass-through audio processing
-- Clean, modern GUI displaying "Hello World"
+- **Stepped Portamento Glide**: Recreates the KORG Triton's stepped glide effect with adjustable time and step count
+- **Monophonic Playback**: Single-voice triggering with natural sample behavior
+- **ADSR Envelope**: Attack, Decay, Sustain, Release envelope control
+- **Drag & Drop**: Load samples by dragging audio files into the plugin
+- **Cross-Platform**: VST3, AudioUnit (AU), and Standalone formats
 
-## Prerequisites
+## Building from Source
 
-- CMake 3.15 or higher
+### Prerequisites
+
+- CMake 3.15 or later
 - C++17 compatible compiler
-- JUCE framework
+- macOS: Xcode command line tools (for code signing)
+- JUCE framework (included as git submodule)
 
-## Building the Plugin
-
-### 1. Clone JUCE
-
-First, you need to clone the JUCE framework into this directory:
+### Quick Build
 
 ```bash
-git clone https://github.com/juce-framework/JUCE.git
+# Clone the repository
+git clone https://github.com/dbbldz/eskilator.git
+cd eskilator
+
+# Initialize JUCE submodule
+git submodule update --init --recursive
+
+# Build all formats (VST3, AU, Standalone)
+./build_and_install.sh
+
+# Or build standalone only for quick UI testing
+./build_and_install.sh standalone
 ```
 
-### 2. Build the Project
+### Manual Build
 
 ```bash
+# Configure
 mkdir build
 cd build
 cmake ..
+
+# Build
 cmake --build . --config Release
+
+# Plugins will be in:
+# - build/Eskilator_artefacts/VST3/Eskilator.vst3
+# - build/Eskilator_artefacts/AU/Eskilator.component
+# - build/Eskilator_artefacts/Standalone/Eskilator.app
 ```
 
-### 3. Install the Plugin
+### Installation
 
-The built plugin will be located in:
-- **VST3**: `build/HelloWorldVST3_artefacts/Release/VST3/`
-- **AudioUnit**: `build/HelloWorldVST3_artefacts/Release/AU/`
-- **Standalone**: `build/HelloWorldVST3_artefacts/Release/Standalone/`
+The `build_and_install.sh` script automatically installs plugins to:
+- **macOS AU**: `~/Library/Audio/Plug-Ins/Components/`
+- **macOS VST3**: `~/Library/Audio/Plug-Ins/VST3/`
 
-Copy the VST3 folder to your system's VST3 directory:
-- **macOS**: `~/Library/Audio/Plug-Ins/VST3/`
-- **Windows**: `C:\Program Files\Common Files\VST3\`
-- **Linux**: `~/.vst3/`
+You may need to restart your DAW for the new plugins to appear.
 
-## Project Structure
+## Usage
 
+### Loading Samples
+
+Drag and drop an audio file (WAV, AIFF, etc.) onto the plugin to load it.
+
+### Parameters
+
+#### ADSR Envelope
+- **Attack**: Envelope attack time (0-2 seconds)
+- **Decay**: Envelope decay time (0-2 seconds)
+- **Sustain**: Sustain level (0-100%)
+- **Release**: Envelope release time (0-5 seconds)
+
+#### Sample Controls
+- **Sample Gain**: Sample volume (-60dB to +12dB)
+
+#### Glide System
+- **Glide Time**: Total duration of the glide effect (0-2 seconds)
+- **Glide Steps**: Number of discrete steps in the glide (1-24 steps)
+  - 1 step = smooth glide
+  - 2-24 steps = stepped Triton-style portamento
+
+## Development
+
+### Logging
+
+The plugin includes a custom logging system (disabled by default for performance). To enable logging:
+
+```cpp
+// In PluginLogger.cpp, set:
+bool PluginLogger::loggingEnabled = true;
+
+// Then use:
+logger.log("Your debug message here");
 ```
-├── CMakeLists.txt          # Main build configuration
-├── Source/
-│   ├── PluginProcessor.h   # Audio processing class header
-│   ├── PluginProcessor.cpp # Audio processing implementation
-│   ├── PluginEditor.h      # GUI class header
-│   └── PluginEditor.cpp    # GUI implementation
-└── README.md               # This file
-```
 
-## Customization
+Logs are written to `plugin_debug.txt` on your desktop.
 
-To customize the plugin:
+### Code Signing
 
-1. **Change the text**: Modify the label text in `Source/PluginEditor.cpp`
-2. **Modify the GUI**: Edit the `paint()` and `resized()` methods in `PluginEditor.cpp`
-3. **Add audio processing**: Implement your audio algorithm in `processBlock()` in `PluginProcessor.cpp`
-4. **Change plugin metadata**: Update the `juce_add_plugin()` call in `CMakeLists.txt`
+The build script automatically handles code signing:
+- Uses Developer ID Application certificate if available
+- Falls back to Mac Developer certificate
+- Uses ad-hoc signing with runtime hardening as last resort
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit pull requests or open issues for bugs and feature requests.
 
 ## License
 
-This project is provided as-is for educational purposes. Modify the company and product information in `CMakeLists.txt` before distributing.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Credits
+
+- Built with [JUCE](https://juce.com/) audio framework
+- Inspired by KORG Triton's stepped portamento glide effect
+- Developed by dubbel dutch
+
+## Contact
+
+- GitHub: [https://github.com/dbbldz/eskilator](https://github.com/dbbldz/eskilator)
+- Email: dutchdubs@gmail.com
+- Website: https://dubbeldutch.com

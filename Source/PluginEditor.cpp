@@ -1,212 +1,462 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "StyleSheet.h"
+#include <iostream>
 
-HelloWorldVST3AudioProcessorEditor::HelloWorldVST3AudioProcessorEditor(HelloWorldVST3AudioProcessor& p)
-    : AudioProcessorEditor(&p), audioProcessor(p)
-{
-    // Configure the title label  
-    titleLabel.setText("16-Step Sequencer", juce::dontSendNotification);
-    titleLabel.setFont(juce::Font(16.0f));
-    titleLabel.setJustificationType(juce::Justification::centred);
-    titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+// Plugin dimensions constants
+const int PLUGIN_WIDTH = 500;
+const int PLUGIN_HEIGHT = 555;
+
+PluginEditor::PluginEditor(GliderAudioProcessor& p)
+    : AudioProcessorEditor(&p), audioProcessor(p), logger(p.logger)
+{    
+    // Set up the editor size
+    setSize(PLUGIN_WIDTH, PLUGIN_HEIGHT);
+    
+    // Create sample bank component FIRST (before any JUCE automatic calls)
+    sampleBankComponent = std::make_unique<SampleBankComponent>(audioProcessor);
+    sampleBankComponent->setSampleRemovedCallback([this](int index) {
+        audioProcessor.removeSample(index);
+        sampleBankComponent->updateSampleList();
+    });
+    sampleBankComponent->setSampleCountChangedCallback([this]() {
+        // Update UI if needed
+    });
+    
+    // Force the component to be visible and on top
+    addAndMakeVisible(sampleBankComponent.get());
+    sampleBankComponent->setAlwaysOnTop(true);
+    sampleBankComponent->toFront(true);
+    
+    // Debug: Log that component was created
+    logger.log("SampleBankComponent created and added to editor FIRST");
+    
+    // Uniform color for all controls and borders
+    auto uniformGreen = juce::Colour(0xff5af542);
+
+    // Configure plugin title label
+    titleLabel.setText("ESKILATOR", juce::dontSendNotification);
+    titleLabel.setFont(juce::Font(24.0f, juce::Font::bold));
+    titleLabel.setJustificationType(juce::Justification::centredLeft);
+    titleLabel.setColour(juce::Label::textColourId, uniformGreen);
     addAndMakeVisible(titleLabel);
+
+    // Configure and add GroupComponents (so they render behind controls)
+    adsrGroup.setText("ADSR Envelope");
+    adsrGroup.setColour(juce::GroupComponent::outlineColourId, uniformGreen);
+    adsrGroup.setColour(juce::GroupComponent::textColourId, juce::Colours::white);
+    addAndMakeVisible(adsrGroup);
+
+    sampleGroup.setText("Controls");
+    sampleGroup.setColour(juce::GroupComponent::outlineColourId, uniformGreen);
+    sampleGroup.setColour(juce::GroupComponent::textColourId, juce::Colours::white);
+    addAndMakeVisible(sampleGroup);
+
+    // Glide group removed - controls now in sample/controls group
+
+    sampleViewerGroup.setText("Sample");
+    sampleViewerGroup.setColour(juce::GroupComponent::outlineColourId, uniformGreen);
+    sampleViewerGroup.setColour(juce::GroupComponent::textColourId, juce::Colours::white);
+    addAndMakeVisible(sampleViewerGroup);
+
+    // Configure ADSR sliders
+    attackSlider.setSliderStyle(juce::Slider::LinearBarVertical);
+    attackSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 40, 20);
+    attackSlider.setRange(ParameterManager::ADSR_ATTACK_MIN, ParameterManager::ADSR_ATTACK_MAX, ParameterManager::ADSR_ATTACK_INCREMENT);
+    attackSlider.setValue(ParameterManager::ADSR_ATTACK_DEFAULT);
+    attackSlider.setColour(juce::Slider::trackColourId, uniformGreen);
+    attackSlider.setColour(juce::Slider::backgroundColourId, juce::Colours::darkgrey);
+    addAndMakeVisible(attackSlider);
+
+    attackLabel.setText("Attack", juce::dontSendNotification);
+    attackLabel.setFont(juce::Font(12.0f));
+    attackLabel.setJustificationType(juce::Justification::centred);
+    attackLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(attackLabel);
+
+    decaySlider.setSliderStyle(juce::Slider::LinearBarVertical);
+    decaySlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 40, 20);
+    decaySlider.setRange(ParameterManager::ADSR_DECAY_MIN, ParameterManager::ADSR_DECAY_MAX, ParameterManager::ADSR_DECAY_INCREMENT);
+    decaySlider.setValue(ParameterManager::ADSR_DECAY_DEFAULT);
+    decaySlider.setColour(juce::Slider::trackColourId, uniformGreen);
+    decaySlider.setColour(juce::Slider::backgroundColourId, juce::Colours::darkgrey);
+    addAndMakeVisible(decaySlider);
+
+    decayLabel.setText("Decay", juce::dontSendNotification);
+    decayLabel.setFont(juce::Font(12.0f));
+    decayLabel.setJustificationType(juce::Justification::centred);
+    decayLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(decayLabel);
+
+    sustainSlider.setSliderStyle(juce::Slider::LinearBarVertical);
+    sustainSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 40, 20);
+    sustainSlider.setRange(ParameterManager::ADSR_SUSTAIN_MIN, ParameterManager::ADSR_SUSTAIN_MAX, ParameterManager::ADSR_SUSTAIN_INCREMENT);
+    sustainSlider.setValue(ParameterManager::ADSR_SUSTAIN_DEFAULT);
+    sustainSlider.setColour(juce::Slider::trackColourId, uniformGreen);
+    sustainSlider.setColour(juce::Slider::backgroundColourId, juce::Colours::darkgrey);
+    addAndMakeVisible(sustainSlider);
+
+    sustainLabel.setText("Sustain", juce::dontSendNotification);
+    sustainLabel.setFont(juce::Font(12.0f));
+    sustainLabel.setJustificationType(juce::Justification::centred);
+    sustainLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(sustainLabel);
+
+    releaseSlider.setSliderStyle(juce::Slider::LinearBarVertical);
+    releaseSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 40, 20);
+    releaseSlider.setRange(ParameterManager::ADSR_RELEASE_MIN, ParameterManager::ADSR_RELEASE_MAX, ParameterManager::ADSR_RELEASE_INCREMENT);
+    releaseSlider.setValue(ParameterManager::ADSR_RELEASE_DEFAULT);
+    releaseSlider.setColour(juce::Slider::trackColourId, uniformGreen);
+    releaseSlider.setColour(juce::Slider::backgroundColourId, juce::Colours::darkgrey);
+    addAndMakeVisible(releaseSlider);
+
+    releaseLabel.setText("Release", juce::dontSendNotification);
+    releaseLabel.setFont(juce::Font(12.0f));
+    releaseLabel.setJustificationType(juce::Justification::centred);
+    releaseLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(releaseLabel);
     
-    // Configure sample label
-    sampleLabel.setText("Drag audio file here", juce::dontSendNotification);
-    sampleLabel.setFont(juce::Font(12.0f));
-    sampleLabel.setJustificationType(juce::Justification::centred);
-    sampleLabel.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
-    addAndMakeVisible(sampleLabel);
+    // Configure sample gain slider
+    sampleGainSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    sampleGainSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 80, 20);
+    sampleGainSlider.setRange(ParameterManager::SAMPLE_GAIN_MIN, ParameterManager::SAMPLE_GAIN_MAX, ParameterManager::SAMPLE_GAIN_INCREMENT);
+    sampleGainSlider.setValue(ParameterManager::SAMPLE_GAIN_DEFAULT);
+    sampleGainSlider.setTextValueSuffix(" dB");
+    sampleGainSlider.setColour(juce::Slider::thumbColourId, uniformGreen);
+    sampleGainSlider.setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colours::darkgrey);
+    sampleGainSlider.setColour(juce::Slider::rotarySliderFillColourId, uniformGreen);
+    addAndMakeVisible(sampleGainSlider);
+
+    sampleGainLabel.setText("Master Gain", juce::dontSendNotification);
+    sampleGainLabel.setFont(juce::Font(12.0f));
+    sampleGainLabel.setJustificationType(juce::Justification::centred);
+    sampleGainLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(sampleGainLabel);
+
+    // Configure glide time slider
+    glideTimeSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    glideTimeSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 80, 20);
+    glideTimeSlider.setRange(ParameterManager::GLIDE_TIME_MIN, ParameterManager::GLIDE_TIME_MAX, ParameterManager::GLIDE_TIME_INCREMENT);
+    glideTimeSlider.setValue(ParameterManager::GLIDE_TIME_DEFAULT);
+    glideTimeSlider.setTextValueSuffix("ms");
+    glideTimeSlider.setColour(juce::Slider::thumbColourId, uniformGreen);
+    glideTimeSlider.setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colours::darkgrey);
+    glideTimeSlider.setColour(juce::Slider::rotarySliderFillColourId, uniformGreen);
+    addAndMakeVisible(glideTimeSlider);
+
+    glideTimeLabel.setText("Glide Time", juce::dontSendNotification);
+    glideTimeLabel.setFont(juce::Font(12.0f));
+    glideTimeLabel.setJustificationType(juce::Justification::centred);
+    glideTimeLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(glideTimeLabel);
+
+    // Configure glide steps slider
+    glideStepsSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    glideStepsSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 80, 20);
+    glideStepsSlider.setRange(ParameterManager::GLIDE_STEPS_MIN, ParameterManager::GLIDE_STEPS_MAX, ParameterManager::GLIDE_STEPS_INCREMENT);
+    glideStepsSlider.setValue(ParameterManager::GLIDE_STEPS_DEFAULT);
+    glideStepsSlider.setTextValueSuffix(" Steps");
+    glideStepsSlider.setColour(juce::Slider::thumbColourId, uniformGreen);
+    glideStepsSlider.setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colours::darkgrey);
+    glideStepsSlider.setColour(juce::Slider::rotarySliderFillColourId, uniformGreen);
+    addAndMakeVisible(glideStepsSlider);
+
+    glideStepsLabel.setText("Glide Steps", juce::dontSendNotification);
+    glideStepsLabel.setFont(juce::Font(12.0f));
+    glideStepsLabel.setJustificationType(juce::Justification::centred);
+    glideStepsLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(glideStepsLabel);
+
     
-    // Configure ADSR sliders with more practical ranges
-    setupSlider(attackSlider, attackLabel, "Attack", 0.0f, 0.25f, 0.01f);       // 0ms to 250ms
-    setupSlider(decaySlider, decayLabel, "Decay", 0.001f, 0.5f, 0.05f);         // 1ms to 500ms
-    setupSlider(sustainSlider, sustainLabel, "Sustain", 0.0f, 1.0f, 0.7f);      // 0% to 100% (keep this range)
-    setupSlider(releaseSlider, releaseLabel, "Release", 0.001f, 1.0f, 0.1f);    // 1ms to 1 second
+
     
-    // Create 16 simple TextButtons FIRST
-    for (int i = 0; i < 16; ++i)
-    {
-        auto* button = new juce::TextButton();
-        button->setButtonText(juce::String(i + 1));
-        button->addListener(this);
-        button->setColour(juce::TextButton::buttonColourId, juce::Colours::darkgrey);
-        button->setColour(juce::TextButton::textColourOffId, juce::Colours::white);
-        addAndMakeVisible(button);
-        stepButtons.add(button);
-    }
+    // Create parameter attachments
+    auto& apvts = audioProcessor.getAPVTS();
+    attackAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "attack", attackSlider);
+    decayAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "decay", decaySlider);
+    sustainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "sustain", sustainSlider);
+    releaseAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "release", releaseSlider);
+    sampleGainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "sampleGain", sampleGainSlider);
+    glideTimeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "glideTime", glideTimeSlider);
+    glideStepsAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "glideSteps", glideStepsSlider);
     
-    // Set size LAST - this triggers resized() which needs buttons to exist
-    setSize(800, 300);
-    
-    // Update UI to reflect the processor's default state
-    updateStepButtonStates();
-    
-    // Start timer to update the current step indicator
-    startTimerHz(30); // Update 30 times per second for smooth animation
+    // Now that all components are created, manually trigger the layout
+    logger.log("All components created, manually calling resized()");
+    resized();
 }
 
-HelloWorldVST3AudioProcessorEditor::~HelloWorldVST3AudioProcessorEditor()
+PluginEditor::~PluginEditor()
 {
-    // Stop the timer
-    stopTimer();
-    // Remove listeners to prevent crashes
-    for (int i = 0; i < stepButtons.size(); ++i)
+    // Explicitly destroy parameter attachments before base class destructor
+    // This prevents crashes when attachments try to access destroyed sliders
+    attackAttachment.reset();
+    decayAttachment.reset();
+    sustainAttachment.reset();
+    releaseAttachment.reset();
+    sampleGainAttachment.reset();
+    glideTimeAttachment.reset();
+    glideStepsAttachment.reset();
+}
+
+void PluginEditor::paint(juce::Graphics& g)
+{
+    g.fillAll(juce::Colours::black);
+}
+
+void PluginEditor::resized()
+{
+    // Debug: Log that resized is being called
+    logger.log("PluginEditor::resized() called");
+
+    auto bounds = getLocalBounds();
+    int margin = 20; // Uniform margin between sections
+    int knobSize = 80;
+    int labelHeight = 20;
+    int groupHeight = 140; // Reduced height for more compact layout
+
+    // Apply outer margins (top and sides)
+    bounds.removeFromTop(margin);
+    bounds.removeFromLeft(margin);
+    bounds.removeFromRight(margin);
+    bounds.removeFromBottom(margin);
+
+    // Position title label in top left corner
+    auto titleArea = bounds.removeFromTop(30);
+    titleLabel.setBounds(titleArea.removeFromLeft(200));
+    bounds.removeFromTop(10); // Small spacing after title
+
+    // Sample viewer section at top (fixed height)
+    int sampleViewerHeight = 150;
+    auto sampleViewerArea = bounds.removeFromTop(sampleViewerHeight);
+    bounds.removeFromTop(10); // Reduced margin after sample viewer
+
+    // Now allocate the remaining space for control groups
+    auto controlsArea = bounds.removeFromTop(groupHeight);
+    bounds.removeFromTop(10); // Reduced margin after controls
+
+    auto adsrArea = bounds; // ADSR fills remaining space
+
+    // Set group bounds
+    sampleViewerGroup.setBounds(sampleViewerArea);
+    sampleGroup.setBounds(controlsArea);
+    adsrGroup.setBounds(adsrArea);
+
+    // Controls Group: Sample gain + Glide controls in a single row
+    auto controlsContentArea = controlsArea.reduced(10);
+    controlsContentArea.removeFromTop(15); // Top margin for group title
+
+    int controlSpacing = 20;
+
+    // Sample gain knob
+    auto sampleGainArea = controlsContentArea.removeFromLeft(knobSize + controlSpacing);
+    sampleGainSlider.setBounds(sampleGainArea.removeFromTop(knobSize));
+    sampleGainLabel.setBounds(sampleGainSlider.getX(), sampleGainSlider.getBottom() + 5, knobSize, labelHeight);
+
+    // Glide Time knob
+    auto glideTimeArea = controlsContentArea.removeFromLeft(knobSize + controlSpacing);
+    glideTimeSlider.setBounds(glideTimeArea.removeFromTop(knobSize));
+    glideTimeLabel.setBounds(glideTimeSlider.getX(), glideTimeSlider.getBottom() + 5, knobSize, labelHeight);
+
+    // Glide Steps knob
+    auto glideStepsArea = controlsContentArea.removeFromLeft(knobSize + controlSpacing);
+    glideStepsSlider.setBounds(glideStepsArea.removeFromTop(knobSize));
+    glideStepsLabel.setBounds(glideStepsSlider.getX(), glideStepsSlider.getBottom() + 5, knobSize, labelHeight);
+    
+    // ADSR Group controls
+    auto adsrControlsArea = adsrArea.reduced(10);
+    adsrControlsArea.removeFromTop(15); // Top margin for group title
+
+    // ADSR controls in a single horizontal row - ensure enough space for sliders and labels
+    auto adsrRow = adsrControlsArea; // Use all available space
+    int adsrBarWidth = 40; // Bar width for ADSR controls - wide enough for text
+    int adsrSliderSpacing = 15; // Tight spacing between ADSR sliders
+
+    // Ensure each slider gets moderate height for better control with lots of padding
+    auto attackArea = adsrRow.removeFromLeft(adsrBarWidth + adsrSliderSpacing);
+    attackSlider.setBounds(attackArea.removeFromTop(knobSize * 1.2).withWidth(adsrBarWidth));
+    attackLabel.setBounds(attackSlider.getX(), attackSlider.getBottom() + 15, adsrBarWidth, labelHeight);
+
+    auto decayArea = adsrRow.removeFromLeft(adsrBarWidth + adsrSliderSpacing);
+    decaySlider.setBounds(decayArea.removeFromTop(knobSize * 1.2).withWidth(adsrBarWidth));
+    decayLabel.setBounds(decaySlider.getX(), decaySlider.getBottom() + 15, adsrBarWidth, labelHeight);
+
+    auto sustainArea = adsrRow.removeFromLeft(adsrBarWidth + adsrSliderSpacing);
+    sustainSlider.setBounds(sustainArea.removeFromTop(knobSize * 1.2).withWidth(adsrBarWidth));
+    sustainLabel.setBounds(sustainSlider.getX(), sustainSlider.getBottom() + 15, adsrBarWidth, labelHeight);
+
+    auto releaseArea = adsrRow.removeFromLeft(adsrBarWidth + adsrSliderSpacing);
+    releaseSlider.setBounds(releaseArea.removeFromTop(knobSize * 1.2).withWidth(adsrBarWidth));
+    releaseLabel.setBounds(releaseSlider.getX(), releaseSlider.getBottom() + 15, adsrBarWidth, labelHeight);
+
+    // Sample Viewer Component content
+    if (sampleBankComponent) {
+        // Padding inside group matching other sections (reduced by 10 for border spacing)
+        auto sampleContentArea = sampleViewerArea.reduced(10);
+        sampleContentArea.removeFromTop(15); // Top margin for group title
+        sampleBankComponent->setBounds(sampleContentArea);
+    }
+    
+
+}
+
+// SampleBankComponent implementation
+SampleBankComponent::SampleBankComponent(GliderAudioProcessor& processor)
+    : audioProcessor(processor),
+      isDragOver(false),
+      thumbnailCache(5),
+      thumbnail(512, formatManager, thumbnailCache)
+{
+    setOpaque(true);
+    formatManager.registerBasicFormats();
+    thumbnail.addChangeListener(this);
+    updateSampleList();
+}
+
+SampleBankComponent::~SampleBankComponent()
+{
+    thumbnail.removeChangeListener(this);
+}
+
+void SampleBankComponent::paint(juce::Graphics& g)
+{
+    // Match app background (black)
+    g.fillAll(juce::Colours::black);
+
+    // Show current sample or drag prompt
+    if (audioProcessor.hasSample())
     {
-        if (stepButtons[i] != nullptr)
+        auto bounds = getLocalBounds().reduced(10);
+
+        // Uniform green color
+        auto uniformGreen = juce::Colour(0xff5af542);
+
+        // Display sample name
+        juce::String sampleName = audioProcessor.getSampleName(0);
+        g.setColour(uniformGreen);
+        g.setFont(14.0f);
+        auto nameArea = bounds.removeFromTop(20);
+        g.drawText(sampleName, nameArea, juce::Justification::centredLeft);
+
+        // Display duration
+        double duration = audioProcessor.getSampleDuration(0);
+        juce::String durationText = juce::String(duration, 2) + "s";
+        g.setColour(juce::Colours::lightgrey);
+        g.setFont(12.0f);
+        auto durationArea = bounds.removeFromTop(18);
+        g.drawText(durationText, durationArea, juce::Justification::centredLeft);
+
+        // Draw waveform if available
+        if (thumbnail.getNumChannels() > 0)
         {
-            stepButtons[i]->removeListener(this);
+            bounds.removeFromTop(5); // Small spacing
+            auto thumbnailBounds = bounds.removeFromTop(bounds.getHeight() - 15); // Leave room for hint
+
+            // Background for waveform
+            g.setColour(juce::Colours::black);
+            g.fillRect(thumbnailBounds);
+
+            // Draw waveform as mono (just channel 0 for cleaner display)
+            g.setColour(uniformGreen.withAlpha(0.8f));
+            thumbnail.drawChannel(g, thumbnailBounds, 0.0, thumbnail.getTotalLength(), 0, 1.0f);
+        }
+
+        // Hint text at bottom
+        g.setColour(juce::Colours::white);
+        g.setFont(11.0f);
+        g.drawText("Drag a new file to replace", bounds, juce::Justification::centredLeft);
+    }
+    else
+    {
+        // Empty state
+        g.setColour(juce::Colours::white.withAlpha(0.7f));
+        g.setFont(16.0f);
+        g.drawText("Drag & Drop Audio File Here", getLocalBounds(), juce::Justification::centred);
+
+        g.setColour(juce::Colours::lightgrey.withAlpha(0.5f));
+        g.setFont(11.0f);
+        g.drawText("WAV, AIFF, MP3, FLAC, OGG, M4A",
+                   getLocalBounds().translated(0, 25),
+                   juce::Justification::centred);
+    }
+
+    // Drag over highlight
+    if (isDragOver)
+    {
+        g.setColour(juce::Colour(0xff00d9ff).withAlpha(0.2f));
+        g.fillAll();
+        g.setColour(juce::Colour(0xff00d9ff));
+        g.drawRect(getLocalBounds(), 3);
+    }
+}
+
+void SampleBankComponent::resized()
+{
+    // No controls to layout - just display sample name in paint()
+}
+
+void SampleBankComponent::updateSampleList()
+{
+    // Update waveform thumbnail when sample changes
+    if (audioProcessor.hasSample())
+    {
+        const auto* buffer = audioProcessor.getSampleBufferForDisplay(0);
+        if (buffer != nullptr)
+        {
+            double sampleRate = audioProcessor.getOriginalSampleRate();
+            thumbnail.reset(buffer->getNumChannels(), sampleRate);
+            thumbnail.addBlock(0, *buffer, 0, buffer->getNumSamples());
         }
     }
+    else
+    {
+        thumbnail.clear();
+    }
+
+    // Repaint to show current sample name and waveform
+    repaint();
 }
 
-void HelloWorldVST3AudioProcessorEditor::paint(juce::Graphics& g)
+void SampleBankComponent::changeListenerCallback(juce::ChangeBroadcaster* source)
 {
-    // Fill background
-    g.fillAll(juce::Colour(0xff1e1e1e));
-    
-    // Draw drop area
-    if (!dropArea.isEmpty())
+    if (source == &thumbnail)
     {
-        if (isDragOver)
-        {
-            g.setColour(juce::Colours::orange.withAlpha(0.3f));
-            g.fillRect(dropArea);
-        }
-        
-        g.setColour(isDragOver ? juce::Colours::orange : juce::Colours::grey);
-        g.drawRect(dropArea, 2);
+        // Thumbnail has finished loading, trigger repaint
+        repaint();
     }
 }
 
-void HelloWorldVST3AudioProcessorEditor::resized()
+bool SampleBankComponent::isInterestedInFileDrag(const juce::StringArray& files)
 {
-    auto area = getLocalBounds();
-    
-    // Title at the top
-    auto titleArea = area.removeFromTop(30);
-    titleLabel.setBounds(titleArea);
-    
-    // Sample info area
-    auto sampleArea = area.removeFromTop(30);
-    sampleLabel.setBounds(sampleArea);
-    dropArea = sampleArea.reduced(5); // Store drop area for drag feedback
-    
-    // ADSR controls area
-    auto adsrArea = area.removeFromTop(80);
-    int sliderWidth = adsrArea.getWidth() / 4;
-    
-    attackSlider.setBounds(adsrArea.getX(), adsrArea.getY(), sliderWidth, 60);
-    attackLabel.setBounds(adsrArea.getX(), adsrArea.getY() + 60, sliderWidth, 20);
-    
-    decaySlider.setBounds(adsrArea.getX() + sliderWidth, adsrArea.getY(), sliderWidth, 60);
-    decayLabel.setBounds(adsrArea.getX() + sliderWidth, adsrArea.getY() + 60, sliderWidth, 20);
-    
-    sustainSlider.setBounds(adsrArea.getX() + sliderWidth * 2, adsrArea.getY(), sliderWidth, 60);
-    sustainLabel.setBounds(adsrArea.getX() + sliderWidth * 2, adsrArea.getY() + 60, sliderWidth, 20);
-    
-    releaseSlider.setBounds(adsrArea.getX() + sliderWidth * 3, adsrArea.getY(), sliderWidth, 60);
-    releaseLabel.setBounds(adsrArea.getX() + sliderWidth * 3, adsrArea.getY() + 60, sliderWidth, 20);
-    
-    // Safety check and arrange 16 buttons in a single row
-    if (stepButtons.size() == 16 && area.getWidth() > 0)
-    {
-        auto buttonWidth = area.getWidth() / 16;
-        for (int i = 0; i < 16; ++i)
-        {
-            if (stepButtons[i] != nullptr)
-            {
-                stepButtons[i]->setBounds(i * buttonWidth, area.getY(), buttonWidth, area.getHeight());
-            }
-        }
-    }
-}
-
-void HelloWorldVST3AudioProcessorEditor::buttonClicked(juce::Button* button)
-{
-    // Safety check
-    if (button == nullptr) return;
-    
-    // Find which step button was clicked and toggle it
-    for (int i = 0; i < stepButtons.size() && i < 16; ++i)
-    {
-        if (stepButtons[i] == button)
-        {
-            bool currentState = audioProcessor.isStepActive(i);
-            audioProcessor.setStepActive(i, !currentState);
-            
-            // Update button color to show state, but preserve current step indicator
-            if (i == currentStepPosition)
-            {
-                // This is the current step - keep it highlighted but update the base color
-                if (!currentState) // Just turned ON
-                {
-                    button->setColour(juce::TextButton::buttonColourId, juce::Colours::orange);
-                    button->setColour(juce::TextButton::textColourOffId, juce::Colours::black);
-                }
-                else // Just turned OFF
-                {
-                    button->setColour(juce::TextButton::buttonColourId, juce::Colours::orange);
-                    button->setColour(juce::TextButton::textColourOffId, juce::Colours::black);
-                }
-            }
-            else
-            {
-                // Regular button update
-                if (!currentState) // Just turned ON
-                {
-                    button->setColour(juce::TextButton::buttonColourId, juce::Colours::limegreen);
-                    button->setColour(juce::TextButton::textColourOffId, juce::Colours::black);
-                }
-                else // Just turned OFF
-                {
-                    button->setColour(juce::TextButton::buttonColourId, juce::Colours::darkgrey);
-                    button->setColour(juce::TextButton::textColourOffId, juce::Colours::white);
-                }
-            }
-            button->repaint();
-            break;
-        }
-    }
-}
-
-void HelloWorldVST3AudioProcessorEditor::timerCallback()
-{
-    // Update the current step indicator
-    updateCurrentStepIndicator();
-}
-
-bool HelloWorldVST3AudioProcessorEditor::isInterestedInFileDrag(const juce::StringArray& files)
-{
-    // Check if any of the files are audio files
     for (const auto& file : files)
     {
-        juce::File audioFile(file);
-        if (audioFile.hasFileExtension("wav;aiff;mp3;flac;ogg;m4a"))
+        if (juce::File(file).hasFileExtension("wav;aiff;mp3;flac;ogg;m4a"))
             return true;
     }
     return false;
 }
 
-void HelloWorldVST3AudioProcessorEditor::fileDragEnter(const juce::StringArray& files, int x, int y)
+void SampleBankComponent::fileDragEnter(const juce::StringArray& files, int x, int y)
 {
-    juce::ignoreUnused(files, x, y);
+    juce::ignoreUnused(x, y);
     isDragOver = true;
     repaint();
 }
 
-void HelloWorldVST3AudioProcessorEditor::fileDragExit(const juce::StringArray& files)
+void SampleBankComponent::fileDragExit(const juce::StringArray& files)
 {
     juce::ignoreUnused(files);
     isDragOver = false;
     repaint();
 }
 
-void HelloWorldVST3AudioProcessorEditor::filesDropped(const juce::StringArray& files, int x, int y)
+void SampleBankComponent::filesDropped(const juce::StringArray& files, int x, int y)
 {
     juce::ignoreUnused(x, y);
     isDragOver = false;
-    
+
+    // Clear existing sample bank (single sample mode)
+    audioProcessor.clearSampleBank();
+
     // Load the first audio file found
     for (const auto& filePath : files)
     {
@@ -214,120 +464,28 @@ void HelloWorldVST3AudioProcessorEditor::filesDropped(const juce::StringArray& f
         if (audioFile.hasFileExtension("wav;aiff;mp3;flac;ogg;m4a"))
         {
             audioProcessor.loadSample(audioFile);
-            
-            // Update the UI to show the loaded sample
-            if (audioProcessor.hasSample())
-            {
-                sampleLabel.setText("Sample: " + audioProcessor.getSampleName(), juce::dontSendNotification);
-            }
-            break; // Only load the first valid audio file
+            break; // Only load one sample
         }
     }
-    
+
     repaint();
 }
 
-void HelloWorldVST3AudioProcessorEditor::setupSlider(juce::Slider& slider, juce::Label& label, 
-                                                    const juce::String& text, float minValue, 
-                                                    float maxValue, float defaultValue)
+// SampleControl - simplified for single sample mode (no individual controls)
+SampleBankComponent::SampleControl::SampleControl()
 {
-    slider.setSliderStyle(juce::Slider::LinearVertical);
-    slider.setRange(minValue, maxValue, 0.001f);
-    slider.setValue(defaultValue);
-    slider.addListener(this);
-    addAndMakeVisible(slider);
-    
-    label.setText(text, juce::dontSendNotification);
-    label.setFont(juce::Font(10.0f));
-    label.setJustificationType(juce::Justification::centred);
-    label.setColour(juce::Label::textColourId, juce::Colours::white);
-    addAndMakeVisible(label);
 }
 
-void HelloWorldVST3AudioProcessorEditor::sliderValueChanged(juce::Slider* slider)
+void SampleBankComponent::SampleControl::resized()
 {
-    if (slider == &attackSlider)
-        audioProcessor.setAttack(static_cast<float>(slider->getValue()));
-    else if (slider == &decaySlider)
-        audioProcessor.setDecay(static_cast<float>(slider->getValue()));
-    else if (slider == &releaseSlider)
-        audioProcessor.setRelease(static_cast<float>(slider->getValue()));
-    else if (slider == &sustainSlider)
-        audioProcessor.setSustain(static_cast<float>(slider->getValue()));
 }
 
-void HelloWorldVST3AudioProcessorEditor::updateStepButtonStates()
+void SampleBankComponent::sliderValueChanged(juce::Slider* slider)
 {
-    // Update all step button colors to match the processor state
-    for (int i = 0; i < stepButtons.size() && i < 16; ++i)
-    {
-        if (stepButtons[i] != nullptr)
-        {
-            // Don't update the current step indicator - preserve its highlight
-            if (i == currentStepPosition)
-                continue;
-                
-            bool isActive = audioProcessor.isStepActive(i);
-            if (isActive)
-            {
-                // Active step - green
-                stepButtons[i]->setColour(juce::TextButton::buttonColourId, juce::Colours::limegreen);
-                stepButtons[i]->setColour(juce::TextButton::textColourOffId, juce::Colours::black);
-            }
-            else
-            {
-                // Inactive step - dark grey
-                stepButtons[i]->setColour(juce::TextButton::buttonColourId, juce::Colours::darkgrey);
-                stepButtons[i]->setColour(juce::TextButton::textColourOffId, juce::Colours::white);
-            }
-            stepButtons[i]->repaint();
-        }
-    }
+    juce::ignoreUnused(slider);
 }
 
-void HelloWorldVST3AudioProcessorEditor::updateCurrentStepIndicator()
+void SampleBankComponent::buttonClicked(juce::Button* button)
 {
-    // Get the current step from the processor
-    int newStepPosition = audioProcessor.getLastTriggeredStep();
-    
-    // Only update if the step position has changed
-    if (newStepPosition != currentStepPosition)
-    {
-        // Clear previous step highlight
-        if (currentStepPosition >= 0 && currentStepPosition < stepButtons.size())
-        {
-            if (stepButtons[currentStepPosition] != nullptr)
-            {
-                bool isActive = audioProcessor.isStepActive(currentStepPosition);
-                if (isActive)
-                {
-                    // Restore active step color (green)
-                    stepButtons[currentStepPosition]->setColour(juce::TextButton::buttonColourId, juce::Colours::limegreen);
-                    stepButtons[currentStepPosition]->setColour(juce::TextButton::textColourOffId, juce::Colours::black);
-                }
-                else
-                {
-                    // Restore inactive step color (dark grey)
-                    stepButtons[currentStepPosition]->setColour(juce::TextButton::buttonColourId, juce::Colours::darkgrey);
-                    stepButtons[currentStepPosition]->setColour(juce::TextButton::textColourOffId, juce::Colours::white);
-                }
-                stepButtons[currentStepPosition]->repaint();
-            }
-        }
-        
-        // Update current step position
-        currentStepPosition = newStepPosition;
-        
-        // Highlight new current step
-        if (currentStepPosition >= 0 && currentStepPosition < stepButtons.size())
-        {
-            if (stepButtons[currentStepPosition] != nullptr)
-            {
-                // Highlight current step with a bright color (orange/amber)
-                stepButtons[currentStepPosition]->setColour(juce::TextButton::buttonColourId, juce::Colours::orange);
-                stepButtons[currentStepPosition]->setColour(juce::TextButton::textColourOffId, juce::Colours::black);
-                stepButtons[currentStepPosition]->repaint();
-            }
-        }
-    }
+    juce::ignoreUnused(button);
 }

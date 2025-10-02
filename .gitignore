@@ -10,6 +10,8 @@ JUCE/
 # IDE files
 .vscode/
 .idea/
+.cursor/
+.claude/
 *.swp
 *.swo
 *~
@@ -54,3 +56,15 @@ CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
 Makefile
+
+# Development certificates and signing
+dev_cert.*
+dev_key.pem
+vst3_dev.*
+code_signing.conf
+
+# Development helper scripts
+quick_build_standalone.sh
+
+# Pluginval directory
+pluginval/

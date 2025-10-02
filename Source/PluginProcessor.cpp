@@ -1,641 +1,771 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
-#include "BinaryData.h"
 
-HelloWorldVST3AudioProcessor::HelloWorldVST3AudioProcessor()
-    : AudioProcessor(BusesProperties()
-        .withInput("Audio Input", juce::AudioChannelSet::disabled(), true)
-        .withOutput("Audio Output", juce::AudioChannelSet::stereo(), true))
+#include <map>
+#include <cmath>
+
+juce::AudioProcessorValueTreeState::ParameterLayout GliderAudioProcessor::createParameterLayout()
 {
-    // Initialize timing system
-    clearTimingQueue();
-    hostTimingValid = false;
-    lastHostTime = 0.0;
-    hostTimeOffset = 0.0;
-    
-    // Set up default quarter note pattern (steps 0, 4, 8, 12)
-    stepActive[0] = true;   // Beat 1
-    stepActive[4] = true;   // Beat 2
-    stepActive[8] = true;   // Beat 3
-    stepActive[12] = true;  // Beat 4
-    
-    // Load default click sample
-    loadDefaultClickSample();
+    return ParameterManager::createParameterLayout();
 }
 
-HelloWorldVST3AudioProcessor::~HelloWorldVST3AudioProcessor()
+GliderAudioProcessor::GliderAudioProcessor()
+    : AudioProcessor(getBusesLayout()),
+      parameterManager(*this)
 {
+    // Register for parameter change notifications for ADSR parameters
+    parameterManager.getAPVTS().addParameterListener("attack", this);
+    parameterManager.getAPVTS().addParameterListener("decay", this);
+    parameterManager.getAPVTS().addParameterListener("sustain", this);
+    parameterManager.getAPVTS().addParameterListener("release", this);
+
+    // Debug: Log plugin capabilities at construction
+    PluginLogger::setLoggingEnabled(false);
+
+    // Load default click sample (optional - plugin can work without it)
+    loadDefaultSample(currentSampleRate);
+
+    // Initialize sample gain to -6dB for safer starting level
+    sampleGainDb = -6.0f;
 }
 
-const juce::String HelloWorldVST3AudioProcessor::getName() const
+GliderAudioProcessor::~GliderAudioProcessor()
 {
-    return "Beat Generator v2";
+    // Unregister parameter listeners to avoid dangling pointer
+    parameterManager.getAPVTS().removeParameterListener("attack", this);
+    parameterManager.getAPVTS().removeParameterListener("decay", this);
+    parameterManager.getAPVTS().removeParameterListener("sustain", this);
+    parameterManager.getAPVTS().removeParameterListener("release", this);
+
+    // Mark plugin as not ready to prevent new background operations
+    isPluginReady = false;
 }
 
-bool HelloWorldVST3AudioProcessor::acceptsMidi() const
+const juce::String GliderAudioProcessor::getName() const
 {
-    return true;  // Accept MIDI input for timing
+    return "Glider";
 }
 
-bool HelloWorldVST3AudioProcessor::producesMidi() const
+bool GliderAudioProcessor::acceptsMidi() const
 {
-    return true;  // Output MIDI notes
+    return true;  // Accept MIDI input for sample triggering
 }
 
-bool HelloWorldVST3AudioProcessor::isMidiEffect() const
+bool GliderAudioProcessor::producesMidi() const
+{
+    return false;  // We don't output MIDI - we're a sample player
+}
+
+bool GliderAudioProcessor::isMidiEffect() const
 {
     return false;  // This is an instrument, not a MIDI effect
 }
 
-double HelloWorldVST3AudioProcessor::getTailLengthSeconds() const
+bool GliderAudioProcessor::isSynth() const
+{
+    return true;  // This IS a synthesizer/instrument
+}
+
+double GliderAudioProcessor::getTailLengthSeconds() const
 {
     return 0.0;
 }
 
-int HelloWorldVST3AudioProcessor::getNumPrograms()
+int GliderAudioProcessor::getNumPrograms()
 {
     return 1;
 }
 
-int HelloWorldVST3AudioProcessor::getCurrentProgram()
+int GliderAudioProcessor::getCurrentProgram()
 {
     return 0;
 }
 
-void HelloWorldVST3AudioProcessor::setCurrentProgram(int index)
+void GliderAudioProcessor::setCurrentProgram(int index)
 {
-    juce::ignoreUnused(index);
+    // No program support
 }
 
-const juce::String HelloWorldVST3AudioProcessor::getProgramName(int index)
+const juce::String GliderAudioProcessor::getProgramName(int index)
 {
-    juce::ignoreUnused(index);
-    return {};
+    return "Default";
 }
 
-void HelloWorldVST3AudioProcessor::changeProgramName(int index, const juce::String& newName)
+void GliderAudioProcessor::changeProgramName(int index, const juce::String& newName)
 {
-    juce::ignoreUnused(index, newName);
+    // No program support
 }
 
-void HelloWorldVST3AudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+void GliderAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
-    // Store sample rate for AU compatibility - getSampleRate() can be unreliable during AU initialization
+    // Store sample rate for calculations
     currentSampleRate = sampleRate;
     
-    // Reset timing system for new sample rate
-    clearTimingQueue();
-    hostTimingValid = false;
+    // Reset all voices and initialize ADSR
+    for (auto& voice : sampleVoices)
+    {
+        voice.isActive = false;
+        voice.isGliding = false;
+        voice.samplePosition = 0;
+        voice.phaseAccumulator = 0.0;
+        voice.glideCurrentStep = 0;
+        voice.glideTotalSteps = 0;
+        voice.glideSamplesPerStep = 0;
+        voice.glideSampleCounter = 0;
+
+        // Initialize ADSR envelope
+        voice.adsr.setSampleRate(sampleRate);
+        juce::ADSR::Parameters adsrParams;
+        adsrParams.attack = getAttack();
+        adsrParams.decay = getDecay();
+        adsrParams.sustain = getSustain();
+        adsrParams.release = getRelease();
+        voice.adsr.setParameters(adsrParams);
+    }
     
-    // Set default timing precision based on sample rate
-    if (sampleRate >= 96000.0)
-        timingPrecisionSamples = 1; // High sample rate = high precision
-    else if (sampleRate >= 48000.0)
-        timingPrecisionSamples = 2; // Standard sample rate = good precision
-    else
-        timingPrecisionSamples = 4; // Lower sample rate = lower precision
-    
-    juce::ignoreUnused(samplesPerBlock);
+    // Mark plugin as ready
+    isPluginReady = true;
 }
 
-void HelloWorldVST3AudioProcessor::releaseResources()
+void GliderAudioProcessor::releaseResources()
 {
+    // Mark plugin as not ready
+    isPluginReady = false;
 }
 
-bool HelloWorldVST3AudioProcessor::isBusesLayoutSupported(const BusesLayout& busesLayout) const
+bool GliderAudioProcessor::isBusesLayoutSupported(const BusesLayout& busesLayout) const
 {
-    // More flexible bus layout for AU compatibility
-    auto outputChannels = busesLayout.getMainOutputChannelSet();
-    
-    // Accept stereo or mono output
-    if (outputChannels != juce::AudioChannelSet::stereo() && 
-        outputChannels != juce::AudioChannelSet::mono())
+    // Support mono and stereo
+    if (busesLayout.getMainOutputChannelSet() != juce::AudioChannelSet::mono()
+        && busesLayout.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
         return false;
-        
-    // Input can be disabled or any valid channel set for AU compatibility
+    
     return true;
 }
 
-void HelloWorldVST3AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
+void GliderAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
-    
-    // Get host timing information
-    auto playHead = getPlayHead();
-    if (playHead != nullptr)
+
+    // Sample-accurate MIDI handling: split buffer at each MIDI event
+    int startSample = 0;
+
+    for (auto it = midiMessages.begin(); it != midiMessages.end(); ++it)
     {
-        juce::AudioPlayHead::CurrentPositionInfo posInfo;
-        if (playHead->getCurrentPosition(posInfo))
+        auto message = (*it).getMessage();
+        int sampleOffset = (*it).samplePosition;
+
+        // Render audio up to this MIDI event
+        if (sampleOffset > startSample)
         {
-            if (posInfo.isPlaying)
+            renderAudioSegment(buffer, startSample, sampleOffset);
+        }
+                    
+        if (message.isNoteOn())
+        {
+            logger.log("MIDI Note ON: Note=" + juce::String(message.getNoteNumber()) + 
+                      ", Velocity=" + juce::String(message.getVelocity()));
+            
+            // Trigger sample playback
+            logger.log("hasSample() = " + juce::String(hasSample() ? "true" : "false"));
+            if (hasSample())
             {
-                // Update host timing state
-                updateHostTiming(posInfo);
+                // Convert MIDI note number to pitch offset (C4 = 60 = 0 semitones)
+                int baseNoteNumber = 60; // Middle C
+                float pitchOffset = static_cast<float>(message.getNoteNumber() - baseNoteNumber);
+                // No pitch limit - allow full MIDI range
                 
-                // Calculate buffer timing using precise sample rate
-                double bufferDuration = buffer.getNumSamples() / getSampleRate();
-                double bufferStartTime = getPreciseTimeFromHost(posInfo);
-                
-                // Schedule timing events for this buffer - pass actual buffer size for precision
-                scheduleTimingEvents(bufferStartTime, bufferDuration, posInfo.bpm, buffer.getNumSamples());
-                
-                // Process all scheduled timing events
-                processTimingEvents(buffer, midiMessages);
-            }
-            else
-            {
-                // Transport stopped - clear timing queue
-                clearTimingQueue();
-                lastBeatClock = -1;
+                // MONOPHONIC DESIGN: Always use voice 0, apply crossfade on every note
+                auto& voice = sampleVoices[0];
+
+                // Check if we should apply glide (different pitch)
+                float glideTime = getGlideTime();
+                int glideSteps = getGlideSteps();
+                bool shouldGlide = (glideTime > 0.0f) && hasLastPitch && (lastMonophonicPitch != pitchOffset);
+
+                logger.log("Note trigger - HasLastPitch=" + juce::String(hasLastPitch ? "true" : "false") +
+                          ", LastPitch=" + juce::String(lastMonophonicPitch) +
+                          ", NewPitch=" + juce::String(pitchOffset) +
+                          ", ShouldGlide=" + juce::String(shouldGlide ? "true" : "false"));
+
+                // Save old state for crossfade before resetting
+                voice.glideOldPhaseAccumulator = voice.phaseAccumulator;
+                voice.glideOldPitchRatio = voice.cachedPitchRatio > 0.0f ? voice.cachedPitchRatio : std::pow(2.0f, voice.pitch / 12.0f);
+
+                if (shouldGlide)
+                {
+                    // Different pitch - apply glide
+                    voice.isGliding = true;
+                    voice.glideStartPitch = lastMonophonicPitch;
+                    voice.glideTargetPitch = pitchOffset;
+                    voice.glideCurrentStep = 0;
+                    voice.glideTotalSteps = glideSteps;
+                    voice.glideSamplesPerStep = static_cast<int>(glideTime * 0.001f * currentSampleRate) / glideSteps;
+                    voice.glideSampleCounter = 0;
+                    voice.cachedPitchRatio = 0.0f; // Force recalculation
+                    voice.pitch = voice.glideStartPitch; // Start with beginning pitch
+
+                    logger.log("Applied glide to voice 0");
+                }
+                else
+                {
+                    // Same pitch or first note - no glide, just set pitch directly
+                    voice.isGliding = false;
+                    voice.pitch = pitchOffset;
+                    voice.cachedPitchRatio = 0.0f; // Force recalculation
+
+                    logger.log("No glide - set voice 0 to pitch " + juce::String(pitchOffset));
+                }
+
+                // Always reset sample position and apply crossfade for clean restart
+                voice.phaseAccumulator = 0.0;
+                voice.samplePosition = 0;
+                voice.isInGlideCrossfade = true;
+                voice.glideCrossfadeSampleCount = 0;
+
+                // Update velocity and activate voice
+                voice.velocity = message.getVelocity() / 127.0f;
+                voice.isActive = true;
+
+                // ADSR ENVELOPE: Always restart envelope on every note
+                voice.adsr.noteOn();
+                logger.log("ADSR noteOn() triggered - envelope restarted");
+
+                // Update monophonic pitch tracking
+                lastMonophonicPitch = pitchOffset;
+                hasLastPitch = true;
             }
         }
+        else if (message.isNoteOff())
+        {
+            // Trigger release phase of ADSR envelope for monophonic voice
+            auto& voice = sampleVoices[0];
+            if (voice.isActive)
+            {
+                voice.adsr.noteOff();
+                logger.log("ADSR noteOff() triggered - starting release phase");
+            }
+        }
+
+        // Update start position for next segment
+        startSample = sampleOffset;
+    }
+
+    // Render any remaining audio after last MIDI event
+    if (startSample < buffer.getNumSamples())
+    {
+        renderAudioSegment(buffer, startSample, buffer.getNumSamples());
+    }
+}
+
+// Render audio for a segment of the buffer
+void GliderAudioProcessor::renderAudioSegment(juce::AudioBuffer<float>& buffer, int startSample, int endSample)
+{
+    // Get current sample buffer
+    int currentSampleIndex = sampleManager.getCurrentSampleIndex();
+    const juce::AudioBuffer<float>& currentBuffer = sampleManager.getCurrentSampleBuffer();
+    
+    // Safety check: if no valid sample is loaded, output silence
+    if (currentSampleIndex < 0 || currentBuffer.getNumSamples() <= 1) {
+        buffer.clear();
+        return;
     }
     
-    // Process audio for each sample
-    for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+    // Cache parameter values to avoid repeated function calls
+    // Note: Per-sample gain is applied per-voice in the voice processing loop
+    float attackSamples = getAttack() * currentSampleRate;
+    float decaySamples = getDecay() * currentSampleRate;
+    float sustainValue = getSustain();
+    float releaseSamples = getRelease() * currentSampleRate;
+    
+    // PERFORMANCE: Cache expensive gain calculations outside the sample loop
+    float masterGainLinear = juce::Decibels::decibelsToGain(getSampleGain());
+    float perSampleGainLinear = juce::Decibels::decibelsToGain(getSampleGain(currentSampleIndex));
+    
+    // ROBUST BUFFER VALIDATION: Use comprehensive validation like vst-test2
+    bool bufferValid = (currentBuffer.getNumSamples() > 0 && currentBuffer.getNumChannels() > 0);
+    int maxSamples = bufferValid ? currentBuffer.getNumSamples() : 0;
+    int maxChannels = bufferValid ? currentBuffer.getNumChannels() : 0;
+    
+    // THREAD-SAFE PERFORMANCE OPTIMIZATION: Cache expensive operations outside the sample loop (like vst-test2)
+    int currentVoiceCount = getVoiceCount();
+    
+    // PERFORMANCE: Early exit if no valid audio to process
+    if (!bufferValid || currentVoiceCount == 0 || maxSamples == 0 || maxChannels == 0) {
+        buffer.clear();
+        return;
+    }
+    
+    // Process audio for each sample in the segment
+    for (int sample = startSample; sample < endSample; ++sample)
     {
         // Generate audio for each output channel
         for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
         {
             auto* channelData = buffer.getWritePointer(channel);
             
-            // Process all active sample voices
+            // Process the single monophonic voice (voice 0)
             float sampleValue = 0.0f;
             bool hasActiveVoices = false;
-            
-            for (int voiceIndex = 0; voiceIndex < MAX_VOICES; ++voiceIndex)
-            {
-                auto& voice = sampleVoices[voiceIndex];
-                if (voice.isActive && voice.samplePosition < sampleBuffer.getNumSamples())
+
+            int sourceChannel = juce::jmin(channel, maxChannels - 1);
+
+            // MONOPHONIC: Only process voice 0
+            auto& voice = sampleVoices[0];
+
+            if (voice.isActive)
                 {
-                    hasActiveVoices = true;
-                    int sourceChannel = juce::jmin(channel, sampleBuffer.getNumChannels() - 1);
-                    float voiceSampleValue = sampleBuffer.getSample(sourceChannel, voice.samplePosition) * 0.5f;
+                    // MULTIPLE SAFETY CHECKS: Comprehensive bounds validation (like vst-test2)
+                    // Since we use phaseAccumulator (not samplePosition), validate based on current phase
+                    float currentSampleIndex = static_cast<float>(voice.phaseAccumulator);
+                    int currentSampleIndexInt = static_cast<int>(currentSampleIndex);
+
+                    // Check if sample has ended (don't deactivate on envelope completion - allows sequential notes)
+                    if (currentSampleIndexInt < 0 || currentSampleIndexInt >= maxSamples)
+                    {
+                        // Deactivate voice only when sample ends
+                        voice.isActive = false;
+                        voice.isGliding = false;
+                        continue;
+                    }
                     
+                    // PARANOID VALIDATION: Double-check buffer state before access (like vst-test2)
+                    if (maxSamples == 0 || maxChannels == 0 || sourceChannel >= maxChannels)
+                    {
+                        continue; // Skip this voice entirely if buffer is invalid
+                    }
+                    
+                    hasActiveVoices = true;
+                    
+                    // For monophonic synth, we don't need noteOffCountdown - voices are managed by voice stealing
+                    // Process glide for stepped portamento (Triton-style) - RE-ENABLED
+                    if (voice.isGliding)
+                    {
+                        voice.glideSampleCounter++;
+                        
+                        // Check if it's time to move to the next step
+                        if (voice.glideSampleCounter >= voice.glideSamplesPerStep)
+                        {
+                            voice.glideCurrentStep++;
+                            voice.glideSampleCounter = 0;
+                            
+                            // Calculate the stepped pitch (discrete steps, not smooth)
+                            if (voice.glideCurrentStep >= voice.glideTotalSteps)
+                            {
+                                // Glide complete - set final pitch (NO PHASE COMPENSATION)
+                                voice.pitch = voice.glideTargetPitch;
+                                voice.cachedPitchRatio = 0.0f; // Force recalculation on next sample
+                                voice.isGliding = false;
+                            }
+                            else
+                            {
+                                // Calculate stepped pitch - this creates the "cheap" Triton sound
+                                float stepProgress = static_cast<float>(voice.glideCurrentStep) / static_cast<float>(voice.glideTotalSteps);
+                                float pitchDifference = voice.glideTargetPitch - voice.glideStartPitch;
+                                float newPitch = voice.glideStartPitch + (pitchDifference * stepProgress);
+
+                                // Update pitch directly (NO PHASE COMPENSATION)
+                                // The discrete pitch jump is intentional for Triton-style stepped glide
+                                voice.pitch = newPitch;
+                                voice.cachedPitchRatio = 0.0f; // Force recalculation on next sample
+                            }
+                        }
+                    }
+                    
+                    // Apply pitch modification
+                    float voiceSampleValue = 0.0f;
+                    
+                    // Calculate pitch ratio with smoothing for glide
+                    float pitchRatio = voice.cachedPitchRatio;
+                    if (pitchRatio == 0.0f)
+                    {
+                        pitchRatio = std::pow(2.0f, voice.pitch / 12.0f);
+                        voice.cachedPitchRatio = pitchRatio;
+                        
+                        
+                        // Debug logging for pitch calculation
+                        if (sample == 0 && channel == 0) { // Only log once per buffer
+                            logger.log("Voice 0 - Pitch: " + juce::String(voice.pitch) +
+                                      ", Pitch Ratio: " + juce::String(pitchRatio) +
+                                      ", Phase: " + juce::String(voice.phaseAccumulator));
+                        }
+                    }
+                    
+                    // Phase-continuous sample reading
+                    float oldPhase = voice.phaseAccumulator;
+                    voice.phaseAccumulator += pitchRatio;
+
+                    // Log suspicious phase jumps during glide
+                    if (voice.isGliding && sample == 0 && channel == 0) {
+                        float phaseJump = voice.phaseAccumulator - oldPhase;
+                        if (phaseJump > pitchRatio * 2.0f || phaseJump < pitchRatio * 0.5f) {
+                            logger.log("PHASE JUMP - Voice 0" +
+                                      juce::String(" - Expected: ") + juce::String(pitchRatio) +
+                                      " - Actual: " + juce::String(phaseJump) +
+                                      " - From: " + juce::String(oldPhase) +
+                                      " - To: " + juce::String(voice.phaseAccumulator));
+                        }
+                    }
+
+                    // GLIDE CROSSFADE: Read from both old and new positions during crossfade
+                    float pitchedSampleValue = 0.0f;
+
+                    if (voice.isInGlideCrossfade && voice.glideCrossfadeSampleCount < voice.GLIDE_CROSSFADE_LENGTH)
+                    {
+                        // Read from NEW position (restarted sample)
+                        float sampleIndex = static_cast<float>(voice.phaseAccumulator);
+                        int sampleIndexInt = static_cast<int>(sampleIndex);
+                        float sampleIndexFrac = sampleIndex - sampleIndexInt;
+
+                        float newSample = 0.0f;
+                        if (sampleIndexInt >= 0 && sampleIndexInt + 1 < maxSamples)
+                        {
+                            try {
+                                float sample1 = currentBuffer.getSample(sourceChannel, sampleIndexInt);
+                                float sample2 = currentBuffer.getSample(sourceChannel, sampleIndexInt + 1);
+                                newSample = sample1 + (sample2 - sample1) * sampleIndexFrac;
+                            } catch (...) {
+                                newSample = 0.0f;
+                            }
+                        }
+                        else if (sampleIndexInt >= 0 && sampleIndexInt < maxSamples)
+                        {
+                            try {
+                                newSample = currentBuffer.getSample(sourceChannel, sampleIndexInt);
+                            } catch (...) {
+                                newSample = 0.0f;
+                            }
+                        }
+
+                        // Read from OLD position (continuation)
+                        float oldSampleIndex = static_cast<float>(voice.glideOldPhaseAccumulator);
+                        int oldSampleIndexInt = static_cast<int>(oldSampleIndex);
+                        float oldSampleIndexFrac = oldSampleIndex - oldSampleIndexInt;
+
+                        float oldSample = 0.0f;
+                        if (oldSampleIndexInt >= 0 && oldSampleIndexInt + 1 < maxSamples)
+                        {
+                            try {
+                                float sample1 = currentBuffer.getSample(sourceChannel, oldSampleIndexInt);
+                                float sample2 = currentBuffer.getSample(sourceChannel, oldSampleIndexInt + 1);
+                                oldSample = sample1 + (sample2 - sample1) * oldSampleIndexFrac;
+                            } catch (...) {
+                                oldSample = 0.0f;
+                            }
+                        }
+                        else if (oldSampleIndexInt >= 0 && oldSampleIndexInt < maxSamples)
+                        {
+                            try {
+                                oldSample = currentBuffer.getSample(sourceChannel, oldSampleIndexInt);
+                            } catch (...) {
+                                oldSample = 0.0f;
+                            }
+                        }
+
+                        // Crossfade between old and new
+                        float blend = static_cast<float>(voice.glideCrossfadeSampleCount) / static_cast<float>(voice.GLIDE_CROSSFADE_LENGTH);
+                        pitchedSampleValue = (oldSample * (1.0f - blend)) + (newSample * blend);
+
+                        // Increment old phase accumulator
+                        voice.glideOldPhaseAccumulator += voice.glideOldPitchRatio;
+
+                        // Increment crossfade counter
+                        voice.glideCrossfadeSampleCount++;
+
+                        // Check if crossfade is complete
+                        if (voice.glideCrossfadeSampleCount >= voice.GLIDE_CROSSFADE_LENGTH)
+                        {
+                            voice.isInGlideCrossfade = false;
+                        }
+                    }
+                    else
+                    {
+                        // Normal sample reading (no crossfade)
+                        float sampleIndex = static_cast<float>(voice.phaseAccumulator);
+                        int sampleIndexInt = static_cast<int>(sampleIndex);
+                        float sampleIndexFrac = sampleIndex - sampleIndexInt;
+
+                        // Debug logging for sample reading
+                        if (sample == 0 && channel == 0 && voice.isGliding) {
+                            logger.log("Voice 0 - Sample Index: " + juce::String(sampleIndex) +
+                                      " (int: " + juce::String(sampleIndexInt) +
+                                      ", frac: " + juce::String(sampleIndexFrac) +
+                                      ") - Max Samples: " + juce::String(maxSamples));
+                        }
+
+                        // ULTRA-SAFE pitched sample value with comprehensive bounds checking (like vst-test2)
+                        if (sampleIndexInt >= 0 && sampleIndexInt + 1 < maxSamples)
+                        {
+                            try {
+                                float sample1 = currentBuffer.getSample(sourceChannel, sampleIndexInt);
+                                float sample2 = currentBuffer.getSample(sourceChannel, sampleIndexInt + 1);
+                                pitchedSampleValue = sample1 + (sample2 - sample1) * sampleIndexFrac;
+                            } catch (...) {
+                                pitchedSampleValue = 0.0f; // Safe fallback
+                            }
+                        }
+                        else if (sampleIndexInt >= 0 && sampleIndexInt < maxSamples)
+                        {
+                            try {
+                                pitchedSampleValue = currentBuffer.getSample(sourceChannel, sampleIndexInt);
+                            } catch (...) {
+                                pitchedSampleValue = 0.0f; // Safe fallback
+                            }
+                        }
+                        else if (sampleIndexInt >= maxSamples)
+                        {
+                            // ENVELOPE DISABLED - one-shot sample has ended, deactivate voice
+                            voice.isActive = false;
+                            voice.isGliding = false;
+                            pitchedSampleValue = 0.0f;
+                        }
+                    }
+                    
+                    // Apply cached gain values instead of calculating per sample
+                    voiceSampleValue = pitchedSampleValue * masterGainLinear * perSampleGainLinear * voice.velocity;
+
                     // Apply ADSR envelope
-                    voiceSampleValue *= voice.currentEnvelopeValue;
-                    sampleValue += voiceSampleValue;
+                    float envelopeValue = voice.adsr.getNextSample();
+                    voiceSampleValue *= envelopeValue;
+
+                    sampleValue = voiceSampleValue;
                 }
-            }
-            
-            // Output audio from active voices
-            if (hasActiveVoices)
-            {
+
+            // Write output (like vst-test2)
+            if (hasActiveVoices) {
                 channelData[sample] = sampleValue;
-            }
-            else
-            {
+            } else {
                 channelData[sample] = 0.0f;
             }
         }
-        
-        // Process all active sample voices
-        for (int voiceIndex = 0; voiceIndex < MAX_VOICES; ++voiceIndex)
-        {
-            auto& voice = sampleVoices[voiceIndex];
-            if (voice.isActive)
-            {
-                // Advance sample position
-                if (voice.samplePosition < sampleBuffer.getNumSamples())
-                {
-                    voice.samplePosition++;
-                }
-                
-                // Process ADSR envelope
-                if (voice.currentEnvelopeState != EnvelopeState::Idle)
-                {
-                    voice.envelopeSampleCounter++;
-                    float sampleRate = static_cast<float>(currentSampleRate);
-                    
-                    switch (voice.currentEnvelopeState)
-                    {
-                        case EnvelopeState::Attack:
-                        {
-                            float attackSamples = attackTimeSeconds * sampleRate;
-                            if (voice.envelopeSampleCounter >= attackSamples)
-                            {
-                                voice.currentEnvelopeState = EnvelopeState::Decay;
-                                voice.envelopeSampleCounter = 0;
-                                voice.currentEnvelopeValue = 1.0f;
-                            }
-                            else
-                            {
-                                voice.currentEnvelopeValue = voice.envelopeSampleCounter / attackSamples;
-                            }
-                            break;
-                        }
-                        case EnvelopeState::Decay:
-                        {
-                            float decaySamples = decayTimeSeconds * sampleRate;
-                            if (voice.envelopeSampleCounter >= decaySamples)
-                            {
-                                voice.currentEnvelopeState = EnvelopeState::Sustain;
-                                voice.envelopeSampleCounter = 0;
-                            }
-                            else
-                            {
-                                float decayProgress = voice.envelopeSampleCounter / decaySamples;
-                                voice.currentEnvelopeValue = 1.0f - (decayProgress * (1.0f - sustainLevelNormalized));
-                            }
-                            break;
-                        }
-                        case EnvelopeState::Sustain:
-                        {
-                            voice.currentEnvelopeValue = sustainLevelNormalized;
-                            break;
-                        }
-                        case EnvelopeState::Release:
-                        {
-                            float releaseSamples = releaseTimeSeconds * sampleRate;
-                            if (voice.envelopeSampleCounter >= releaseSamples)
-                            {
-                                voice.currentEnvelopeState = EnvelopeState::Idle;
-                                voice.currentEnvelopeValue = 0.0f;
-                                voice.isActive = false; // Mark voice as inactive
-                            }
-                            else
-                            {
-                                float releaseProgress = voice.envelopeSampleCounter / releaseSamples;
-                                voice.currentEnvelopeValue = sustainLevelNormalized * (1.0f - releaseProgress);
-                            }
-                            break;
-                        }
-                        default:
-                            break;
-                    }
-                }
-                
-                // Check if voice should start release
-                if (voice.noteOffCountdown > 0)
-                {
-                    voice.noteOffCountdown--;
-                    if (voice.noteOffCountdown <= 0 || voice.samplePosition >= sampleBuffer.getNumSamples())
-                    {
-                        voice.currentEnvelopeState = EnvelopeState::Release;
-                        voice.envelopeSampleCounter = 0;
-                    }
-                }
-            }
-        }
+    }
+
+    // Clear any remaining channels
+    for (int channel = buffer.getNumChannels(); channel < buffer.getNumChannels(); ++channel)
+    {
+        buffer.clear(channel, 0, buffer.getNumSamples());
     }
 }
 
-bool HelloWorldVST3AudioProcessor::hasEditor() const
+juce::AudioProcessorEditor* GliderAudioProcessor::createEditor()
+{
+    return new PluginEditor(*this);
+}
+
+bool GliderAudioProcessor::hasEditor() const
 {
     return true;
 }
 
-juce::AudioProcessorEditor* HelloWorldVST3AudioProcessor::createEditor()
+void GliderAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
-    return new HelloWorldVST3AudioProcessorEditor(*this);
+    auto state = parameterManager.getAPVTS().copyState();
+    std::unique_ptr<juce::XmlElement> xml(state.createXml());
+    copyXmlToBinary(*xml, destData);
 }
 
-void HelloWorldVST3AudioProcessor::getStateInformation(juce::MemoryBlock& destData)
+void GliderAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
-    juce::ignoreUnused(destData);
-}
-
-void HelloWorldVST3AudioProcessor::setStateInformation(const void* data, int sizeInBytes)
-{
-    juce::ignoreUnused(data, sizeInBytes);
-}
-
-// Step sequencer functionality
-void HelloWorldVST3AudioProcessor::setStepActive(int stepIndex, bool isActive)
-{
-    if (stepIndex >= 0 && stepIndex < 16)
+    std::unique_ptr<juce::XmlElement> xmlState(getXmlFromBinary(data, sizeInBytes));
+    
+    if (xmlState.get() != nullptr)
     {
-        stepActive[stepIndex] = isActive;
+        if (xmlState->hasTagName(parameterManager.getAPVTS().state.getType()))
+        {
+            parameterManager.getAPVTS().replaceState(juce::ValueTree::fromXml(*xmlState));
+        }
+    }
+    
+    // Call state restored callback if set
+    if (onStateRestored)
+    {
+        onStateRestored();
     }
 }
 
-bool HelloWorldVST3AudioProcessor::isStepActive(int stepIndex) const
+void GliderAudioProcessor::loadSample(const juce::File& audioFile)
 {
-    if (stepIndex >= 0 && stepIndex < 16)
-        return stepActive[stepIndex];
-    return false;
+    sampleManager.loadSample(audioFile, currentSampleRate);
 }
 
-void HelloWorldVST3AudioProcessor::loadSample(const juce::File& audioFile)
+void GliderAudioProcessor::loadDefaultSample(double sampleRate)
 {
-    juce::AudioFormatManager formatManager;
-    formatManager.registerBasicFormats(); // WAV, AIFF, etc.
+    sampleManager.loadDefaultSample(sampleRate);
+}
+
+juce::String GliderAudioProcessor::getCurrentSampleName() const
+{
+    int currentIndex = sampleManager.getCurrentSampleIndex();
+    return sampleManager.getSampleName(currentIndex);
+}
+
+double GliderAudioProcessor::getSampleDuration(int index) const
+{
+    if (!sampleManager.hasSampleAtIndex(index))
+        return 0.0;
+
+    const auto& buffer = sampleManager.getSampleBuffer(index);
+    double sampleRate = sampleManager.getOriginalSampleRate(index);
+
+    if (sampleRate <= 0.0)
+        return 0.0;
+
+    return static_cast<double>(buffer.getNumSamples()) / sampleRate;
+}
+
+const juce::AudioBuffer<float>* GliderAudioProcessor::getSampleBufferForDisplay(int index) const
+{
+    if (!sampleManager.hasSampleAtIndex(index))
+        return nullptr;
+
+    return &sampleManager.getSampleBuffer(index);
+}
+
+void GliderAudioProcessor::removeSample(int index)
+{
+    sampleManager.removeSample(index);
+}
+
+void GliderAudioProcessor::clearSampleBank()
+{
+    sampleManager.clearSampleBank();
+}
+
+bool GliderAudioProcessor::reloadSampleFromPath()
+{
+    return sampleManager.reloadSampleFromPath(currentSampleRate);
+}
+
+int GliderAudioProcessor::allocateVoice()
+{
+    int currentVoiceCount = getVoiceCount();
     
-    auto reader = formatManager.createReaderFor(audioFile);
-    if (reader != nullptr)
+    logger.log("allocateVoice() called - VoiceCount=" + juce::String(currentVoiceCount) + 
+              ", Voice0 active=" + juce::String(sampleVoices[0].isActive ? "true" : "false"));
+    
+    // First, try to find an inactive voice (works for both mono and poly)
+    for (int i = 0; i < currentVoiceCount && i < MAX_VOICES; ++i)
     {
-        // Resize buffer to fit the sample
-        sampleBuffer.setSize(static_cast<int>(reader->numChannels), 
-                           static_cast<int>(reader->lengthInSamples));
-        
-        // Read the audio file into our buffer
-        reader->read(&sampleBuffer, 0, static_cast<int>(reader->lengthInSamples), 0, true, true);
-        
-        // Store the sample name
-        currentSampleName = audioFile.getFileNameWithoutExtension();
-        
-        // Reset playback position
-        samplePosition = 0;
-        
-        delete reader;
+        if (!sampleVoices[i].isActive)
+        {
+            logger.log("Found inactive voice " + juce::String(i) + " for allocation");
+            return i;
+        }
+    }
+    
+    // If no inactive voices, steal the oldest one within the allowed voice count
+    int oldestVoice = 0;
+    juce::uint64 oldestTime = sampleVoices[0].voiceStartTime;
+    
+    for (int i = 1; i < currentVoiceCount && i < MAX_VOICES; ++i)
+    {
+        if (sampleVoices[i].voiceStartTime < oldestTime)
+        {
+            oldestTime = sampleVoices[i].voiceStartTime;
+            oldestVoice = i;
+        }
+    }
+    
+    // CROSSFADE DISABLED - immediately deactivate stolen voice
+    auto& stolenVoice = sampleVoices[oldestVoice];
+    if (stolenVoice.isActive)
+    {
+        logger.log("Voice " + juce::String(oldestVoice) + " stolen and deactivated");
+        stolenVoice.isActive = false;
+        stolenVoice.isGliding = false;
+    }
+
+    return oldestVoice;
+}
+
+void GliderAudioProcessor::startVoice(int voiceIndex, float velocity, float pitch)
+{
+    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES)
+        return;
+
+    auto& voice = sampleVoices[voiceIndex];
+
+    // Debug logging for pitch
+    logger.log("startVoice - Input pitch: " + juce::String(pitch) +
+              ", Velocity: " + juce::String(velocity));
+
+    // Initialize voice parameters (like vst-test2)
+    voice.samplePosition = 0;
+    voice.phaseAccumulator = 0.0;  // Initialize phase accumulator for continuous reading
+    voice.velocity = juce::jlimit(0.0f, 1.0f, velocity); // Store and clamp velocity
+    
+    // Get current sample index and apply per-sample transpose (like vst-test2)
+    int currentSampleIndex = sampleManager.getCurrentSampleIndex();
+    float sampleTranspose = 0.0f; // TODO: Implement getSampleTranspose if needed
+    float finalPitch = pitch + sampleTranspose;  // No pitch limit - allow full range
+
+    // Simple voice initialization - no glide logic here
+    voice.isGliding = false;
+    voice.pitch = finalPitch;
+    voice.cachedPitchRatio = 0.0f; // Force recalculation
+    
+    // Use processed sample buffer if available, otherwise original (like vst-test2)
+    int bufferLength = sampleManager.getCurrentSampleBuffer().getNumSamples();
+    voice.noteOffCountdown = juce::jmin(bufferLength, static_cast<int>(currentSampleRate * 2.0));
+    
+    // Initialize voice and reset all glide state
+    voice.isActive = true;
+    voice.isGliding = false;
+    voice.glideCurrentStep = 0;
+    voice.glideSampleCounter = 0;
+    voice.cachedPitchRatio = 0.0f; // Force recalculation
+
+    // ENVELOPE DISABLED - no envelope initialization needed
+    // CROSSFADE DISABLED - no crossfade state initialization needed
+
+    // Debug logging for voice start
+    logger.log("Voice " + juce::String(voiceIndex) + " STARTED - Velocity=" + juce::String(velocity) +
+              ", Pitch=" + juce::String(finalPitch) +
+              ", NoteOffCountdown=" + juce::String(voice.noteOffCountdown));
+    
+    // Track when this voice started for voice stealing (like vst-test2)
+    voice.voiceStartTime = ++voiceAllocationCounter;
+}
+
+void GliderAudioProcessor::parameterChanged(const juce::String& parameterID, float newValue)
+{
+    // Handle parameter changes if needed
+    logger.log("Parameter changed: " + parameterID + " = " + juce::String(newValue));
+
+    // Update ADSR parameters when they change
+    if (parameterID == "attack" || parameterID == "decay" ||
+        parameterID == "sustain" || parameterID == "release")
+    {
+        // Update ADSR for voice 0 (monophonic)
+        juce::ADSR::Parameters adsrParams;
+        adsrParams.attack = getAttack();
+        adsrParams.decay = getDecay();
+        adsrParams.sustain = getSustain();
+        adsrParams.release = getRelease();
+
+        sampleVoices[0].adsr.setParameters(adsrParams);
+
+        logger.log("ADSR updated - A:" + juce::String(adsrParams.attack) +
+                  " D:" + juce::String(adsrParams.decay) +
+                  " S:" + juce::String(adsrParams.sustain) +
+                  " R:" + juce::String(adsrParams.release));
     }
 }
 
-void HelloWorldVST3AudioProcessor::loadDefaultClickSample()
+void GliderAudioProcessor::updateParametersFromUI()
 {
-    // Load the embedded click sample from binary data
-    juce::AudioFormatManager formatManager;
-    formatManager.registerBasicFormats();
-    
-    // Get the embedded binary data
-    const char* clickData = BinaryData::Click_808_wav;
-    int clickDataSize = BinaryData::Click_808_wavSize;
-    
-    // Create a memory input stream from the binary data
-    auto memoryStream = std::make_unique<juce::MemoryInputStream>(clickData, clickDataSize, false);
-    
-    // Create a reader for the audio data
-    auto reader = formatManager.createReaderFor(std::move(memoryStream));
-    
-    if (reader != nullptr)
-    {
-        // Resize buffer to fit the sample
-        sampleBuffer.setSize(static_cast<int>(reader->numChannels), 
-                           static_cast<int>(reader->lengthInSamples));
-        
-        // Read the audio file into our buffer
-        reader->read(&sampleBuffer, 0, static_cast<int>(reader->lengthInSamples), 0, true, true);
-        
-        // Store the sample name
-        currentSampleName = "Click 808";
-        
-        // Reset playback position
-        samplePosition = 0;
-        
-        delete reader;
-    }
+    // Update cached parameter values if needed
 }
 
+juce::AudioProcessor::BusesProperties GliderAudioProcessor::getBusesLayout()
+{
+    return BusesProperties()
+        .withInput("Input", juce::AudioChannelSet::stereo(), true)
+        .withOutput("Output", juce::AudioChannelSet::stereo(), true);
+}
 
-
+// This function is required for the standalone version
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new HelloWorldVST3AudioProcessor();
+    return new GliderAudioProcessor();
 }
-
-// Private timing methods implementation
-void HelloWorldVST3AudioProcessor::updateHostTiming(const juce::AudioPlayHead::CurrentPositionInfo& posInfo)
-{
-    // Calculate precise time from host position
-    double currentTime = getPreciseTimeFromHost(posInfo);
-    
-    // Update host timing state
-    if (!hostTimingValid)
-    {
-        hostTimeOffset = 0.0;
-        lastHostTime = currentTime;
-        hostTimingValid = true;
-        
-        // Auto-calibrate timing for new BPM
-        if (posInfo.bpm > 0.0)
-        {
-            calibrateTiming(posInfo.bpm);
-        }
-    }
-    else
-    {
-        // Check for timing discontinuities (loops, jumps, etc.)
-        static juce::int64 lastTimeInSamples = 0;
-        
-        // Only check for discontinuities if we have a valid previous time
-        if (lastTimeInSamples > 0)
-        {
-            double expectedTime = lastHostTime + (posInfo.timeInSamples - lastTimeInSamples) / currentSampleRate;
-            if (std::abs(currentTime - expectedTime) > 0.1) // More than 100ms jump
-            {
-                hostTimeOffset = currentTime - expectedTime;
-            }
-        }
-        lastTimeInSamples = posInfo.timeInSamples;
-        
-        // Check for BPM changes and recalibrate if needed
-        if (std::abs(posInfo.bpm - lastBPM) > 0.1) // BPM changed by more than 0.1
-        {
-            calibrateTiming(posInfo.bpm);
-            lastBPM = posInfo.bpm;
-        }
-        
-        lastHostTime = currentTime;
-    }
-}
-
-void HelloWorldVST3AudioProcessor::scheduleTimingEvents(double bufferStartTime, double bufferDuration, double bpm, int actualBufferSamples)
-{
-    // Clear previous timing queue
-    timingQueue.clear();
-    
-    if (bpm <= 0.0) return;
-    
-    // Get current host position info for precise synchronization
-    auto playHead = getPlayHead();
-    if (playHead == nullptr) return;
-    
-    juce::AudioPlayHead::CurrentPositionInfo posInfo;
-    if (!playHead->getCurrentPosition(posInfo) || posInfo.ppqPosition < 0.0) return;
-    
-    // Calculate timing for 16th notes (4 per quarter note)
-    double sixteenthNoteDuration = 60.0 / (bpm * 4.0);
-    double samplesPerSixteenth = sixteenthNoteDuration * currentSampleRate;
-    
-    // Use ultra-precise PPQ calculation based on host timing
-    double bufferStartPPQ = posInfo.ppqPosition;
-    double currentBPM = posInfo.bpm > 0.0 ? posInfo.bpm : bpm;
-    
-    // Verify we have valid PPQ position
-    if (bufferStartPPQ < 0.0) 
-    {
-        // Fallback: use time-based calculation only if PPQ not available
-        double samplesFromTimelineStart = static_cast<double>(posInfo.timeInSamples);
-        bufferStartPPQ = (samplesFromTimelineStart / getSampleRate()) * (currentBPM / 60.0);
-    }
-    
-    // Calculate PPQ per sample for drift-free precision
-    double ppqPerSample = (currentBPM / 60.0) / getSampleRate();
-    // Use actual buffer samples - no calculation to introduce errors
-    double bufferEndPPQ = bufferStartPPQ + (actualBufferSamples * ppqPerSample);
-    
-    // Calculate 16th note positions in PPQ (0.25 PPQ per 16th note)
-    double sixteenthNotePPQ = 0.25; // 1/4 of a quarter note
-    
-    // Add small buffer zone to catch events near boundaries (prevents timing gaps)
-    double searchStartPPQ = bufferStartPPQ - (sixteenthNotePPQ * 0.05); // 5% buffer
-    double searchEndPPQ = bufferEndPPQ + (sixteenthNotePPQ * 0.05);
-    
-    // Find the first 16th note that falls within the extended search range
-    double firstSixteenthPPQ = std::ceil(searchStartPPQ / sixteenthNotePPQ) * sixteenthNotePPQ;
-    
-    // Schedule events for all 16th notes that fall within the extended search range
-    double currentPPQ = firstSixteenthPPQ;
-    while (currentPPQ <= searchEndPPQ)
-    {
-        // Calculate which step this represents (0-15) based on 16th note position
-        // Each 4 quarter notes = 16 sixteenth notes = one complete 16-step cycle
-        int totalSixteenths = static_cast<int>(std::round(currentPPQ / sixteenthNotePPQ));
-        int stepNumber = totalSixteenths % 16;
-        
-        // Only schedule if this step is active
-        if (stepActive[stepNumber])
-        {
-            // Ultra-precise sample calculation using PPQ-per-sample ratio
-            // This eliminates floating-point accumulation errors
-            double ppqFromBufferStart = currentPPQ - bufferStartPPQ;
-            double exactSampleOffset = ppqFromBufferStart / ppqPerSample;
-            
-            // For ultra-precise timing, use fractional sample positioning
-            // This prevents cumulative rounding errors
-            double fractionalPart = exactSampleOffset - std::floor(exactSampleOffset);
-            int sampleOffset = static_cast<int>(std::floor(exactSampleOffset));
-            
-            // If fractional part is >= 0.5, round up for better precision
-            if (fractionalPart >= 0.5)
-            {
-                sampleOffset += 1;
-            }
-            
-            // Ensure sample offset is within reasonable buffer bounds
-            // Allow slight negative offsets for buffer boundary precision, but clamp to valid range
-            int bufferSizeInSamples = actualBufferSamples;
-            if (sampleOffset >= -2 && sampleOffset < bufferSizeInSamples + 2) // 2-sample tolerance
-            {
-                // Clamp to actual buffer bounds for processing
-                sampleOffset = juce::jlimit(0, bufferSizeInSamples - 1, sampleOffset);
-                // Check for duplicates using PPQ position with higher precision
-                bool shouldSchedule = true;
-                if (lastTriggeredStep == stepNumber)
-                {
-                    double ppqSinceLastTrigger = currentPPQ - lastTriggeredStepPPQ;
-                    if (ppqSinceLastTrigger < sixteenthNotePPQ * 0.95) // 95% threshold for precision
-                    {
-                        shouldSchedule = false;
-                    }
-                }
-                
-                if (shouldSchedule)
-                {
-                    TimingEvent event;
-                    event.stepNumber = stepNumber;
-                    // Store precise PPQ position for drift-free timing
-                    event.preciseTime = currentPPQ; // Store PPQ instead of time
-                    event.sampleOffset = sampleOffset;
-                    event.isProcessed = false;
-                    
-                    timingQueue.push_back(event);
-                    
-                    // Update last triggered info with precise PPQ
-                    lastTriggeredStep = stepNumber;
-                    lastTriggeredStepPPQ = currentPPQ;
-                }
-            }
-        }
-        
-        // Move to next 16th note
-        currentPPQ += sixteenthNotePPQ;
-    }
-}
-
-void HelloWorldVST3AudioProcessor::processTimingEvents(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
-{
-    for (auto& event : timingQueue)
-    {
-        if (!event.isProcessed && event.sampleOffset < buffer.getNumSamples())
-        {
-            // Mark event as processed
-            event.isProcessed = true;
-            
-            // Update global timing state to prevent duplicates
-            // Note: event.preciseTime now stores PPQ position for precision
-            lastTriggeredStepPPQ = event.preciseTime; // This is now PPQ position
-            lastTriggeredStep = event.stepNumber;
-            
-            // Generate MIDI note
-            int noteNumber = 60 + (event.stepNumber % 12);
-            int velocity = 100;
-            midiMessages.addEvent(juce::MidiMessage::noteOn(1, noteNumber, (juce::uint8)velocity), event.sampleOffset);
-            
-            // Trigger sample playback if available
-            if (hasSample())
-            {
-                // Find an available voice
-                int voiceIndex = -1;
-                for (int i = 0; i < MAX_VOICES; ++i)
-                {
-                    if (!sampleVoices[i].isActive)
-                    {
-                        voiceIndex = i;
-                        break;
-                    }
-                }
-                
-                if (voiceIndex >= 0)
-                {
-                    // Start new sample voice
-                    auto& voice = sampleVoices[voiceIndex];
-                    voice.samplePosition = 0;
-                    voice.noteOffCountdown = juce::jmin(sampleBuffer.getNumSamples(), static_cast<int>(currentSampleRate * 2.0));
-                    voice.currentEnvelopeState = EnvelopeState::Attack;
-                    voice.currentEnvelopeValue = 0.0f;
-                    voice.envelopeSampleCounter = 0;
-                    voice.isActive = true;
-                }
-            }
-        }
-    }
-}
-
-double HelloWorldVST3AudioProcessor::getPreciseTimeFromHost(const juce::AudioPlayHead::CurrentPositionInfo& posInfo)
-{
-    // Use timeInSamples for highest precision
-    if (posInfo.timeInSamples >= 0)
-    {
-        return posInfo.timeInSamples / currentSampleRate;
-    }
-    
-    // Fallback to PPQ position if timeInSamples is not available
-    if (posInfo.ppqPosition >= 0.0 && posInfo.bpm > 0.0)
-    {
-        return (posInfo.ppqPosition * 60.0) / posInfo.bpm;
-    }
-    
-    // Last resort fallback
-    return 0.0;
-}
-
-void HelloWorldVST3AudioProcessor::clearTimingQueue()
-{
-    timingQueue.clear();
-    lastProcessedTime = 0.0;
-    currentBufferStartTime = 0.0;
-    
-    // Reset global timing state
-    lastTriggeredStepTime = -1.0;
-    lastTriggeredStep = -1;
-    lastTriggeredStepPPQ = -1.0;
-    globalTimingOffset = 0.0;
-}
-
-// Additional timing utility method
-void HelloWorldVST3AudioProcessor::calibrateTiming(double bpm)
-{
-    if (bpm <= 0.0) return;
-    
-    // With PPQ-based timing, we no longer need the old precision samples approach
-    // The new system uses fractional sample positioning for drift-free timing
-    timingPrecisionSamples = 1; // Always sample-accurate now
-    
-    // Reset timing state for new BPM
-    lastTriggeredStepTime = -1.0;
-    lastTriggeredStep = -1;
-    lastTriggeredStepPPQ = -1.0;
-    globalTimingOffset = 0.0;
-}
-
