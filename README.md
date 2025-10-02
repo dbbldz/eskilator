@@ -88,6 +88,11 @@ Drag and drop an audio file (WAV, AIFF, etc.) onto the plugin to load it.
   - 1 step = smooth glide
   - 2-24 steps = stepped Triton-style portamento
 
+### Known Issues
+
+- **Release and Glide Interaction**: Some samples glide more smoothly when the Release time is raised. If you experience choppy glide effects, try increasing the Release parameter.
+- **Staccato Note Envelope**: When playing notes staccato (short, detached notes), if the Release time is too short, the envelope may not restart properly on the next note. Increase the Release time if notes don't trigger consistently during fast staccato playing.
+
 ## Development
 
 ### Logging
