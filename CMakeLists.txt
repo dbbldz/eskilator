@@ -10,7 +10,7 @@ add_subdirectory(JUCE)
 
 # Create the plugin
 juce_add_plugin(Eskilator
-    VERSION "1.0.0"
+    VERSION "0.9.2"
     COMPANY_NAME "Rare Earth Tones"
     COMPANY_WEBSITE "https://github.com/dbbldz/eskilator"
     COMPANY_EMAIL "dutchdubs@gmail.com"
