@@ -72,7 +72,8 @@ if [ "$PACKAGE_ONLY" -eq 0 ]; then
     rm -rf build
     mkdir -p build
     cd build
-    cmake -DCMAKE_BUILD_TYPE=Release ..
+    echo -e "${YELLOW}🏗️  Building universal binary for release (i386, x86_64, arm64)...${NC}"
+    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="i386;x86_64;arm64" ..
     cd ..
 
     # Build all targets
@@ -197,7 +198,8 @@ After installation, restart your DAW.
 SYSTEM REQUIREMENTS
 -------------------
 - macOS 10.13 or later
-- 64-bit AU or VST3 compatible host
+- Universal binary: supports 32-bit Intel, 64-bit Intel, and Apple Silicon
+- AU or VST3 compatible host
 
 SUPPORT
 -------
