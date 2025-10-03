@@ -173,6 +173,9 @@ void GliderAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
                 // Convert MIDI note number to pitch offset (C4 = 60 = 0 semitones)
                 int baseNoteNumber = 60; // Middle C
                 float pitchOffset = static_cast<float>(message.getNoteNumber() - baseNoteNumber);
+                // Apply global transpose and fine tune (cents converted to semitones)
+                pitchOffset += getTranspose();
+                pitchOffset += getFineTune() / 100.0f; // Convert cents to semitones
                 // No pitch limit - allow full MIDI range
                 
                 // MONOPHONIC DESIGN: Always use voice 0, apply crossfade on every note

@@ -49,6 +49,18 @@ public:
     static constexpr float GLIDE_STEPS_DEFAULT = 2.0f;   // Default 2 steps for quick glide
     static constexpr float GLIDE_STEPS_INCREMENT = 1.0f; // 1 step increments
 
+    // Global Transpose Parameter Constants
+    static constexpr float TRANSPOSE_MIN = -24.0f;       // -2 octaves
+    static constexpr float TRANSPOSE_MAX = 24.0f;        // +2 octaves
+    static constexpr float TRANSPOSE_DEFAULT = 0.0f;     // No transpose
+    static constexpr float TRANSPOSE_INCREMENT = 1.0f;   // 1 semitone increments
+
+    // Fine Tune (Cents) Parameter Constants
+    static constexpr float FINETUNE_MIN = -100.0f;       // -100 cents
+    static constexpr float FINETUNE_MAX = 100.0f;        // +100 cents
+    static constexpr float FINETUNE_DEFAULT = 0.0f;      // No fine tune
+    static constexpr float FINETUNE_INCREMENT = 1.0f;    // 1 cent increments
+
     ParameterManager(juce::AudioProcessor& processor);
     ~ParameterManager() = default;
 
@@ -67,6 +79,8 @@ public:
     int getVoiceCount() const;
     float getGlideTime() const;
     int getGlideSteps() const;
+    float getTranspose() const;
+    float getFineTune() const;
 
 private:
     juce::AudioProcessorValueTreeState apvts;

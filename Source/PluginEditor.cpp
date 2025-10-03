@@ -167,6 +167,41 @@ PluginEditor::PluginEditor(GliderAudioProcessor& p)
     glideStepsLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(glideStepsLabel);
 
+    // Configure transpose slider
+    transposeSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    transposeSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 80, 20);
+    transposeSlider.setRange(ParameterManager::TRANSPOSE_MIN, ParameterManager::TRANSPOSE_MAX, ParameterManager::TRANSPOSE_INCREMENT);
+    transposeSlider.setValue(ParameterManager::TRANSPOSE_DEFAULT);
+    transposeSlider.setNumDecimalPlacesToDisplay(0); // Show integers only
+    transposeSlider.setTextValueSuffix(" st");
+    transposeSlider.setColour(juce::Slider::thumbColourId, uniformGreen);
+    transposeSlider.setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colours::darkgrey);
+    transposeSlider.setColour(juce::Slider::rotarySliderFillColourId, uniformGreen);
+    addAndMakeVisible(transposeSlider);
+
+    transposeLabel.setText("Transpose", juce::dontSendNotification);
+    transposeLabel.setFont(juce::Font(12.0f));
+    transposeLabel.setJustificationType(juce::Justification::centred);
+    transposeLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(transposeLabel);
+
+    // Configure fine tune slider
+    fineTuneSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    fineTuneSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 80, 20);
+    fineTuneSlider.setRange(ParameterManager::FINETUNE_MIN, ParameterManager::FINETUNE_MAX, ParameterManager::FINETUNE_INCREMENT);
+    fineTuneSlider.setValue(ParameterManager::FINETUNE_DEFAULT);
+    fineTuneSlider.setTextValueSuffix(" ct");
+    fineTuneSlider.setColour(juce::Slider::thumbColourId, uniformGreen);
+    fineTuneSlider.setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colours::darkgrey);
+    fineTuneSlider.setColour(juce::Slider::rotarySliderFillColourId, uniformGreen);
+    addAndMakeVisible(fineTuneSlider);
+
+    fineTuneLabel.setText("Fine Tune", juce::dontSendNotification);
+    fineTuneLabel.setFont(juce::Font(12.0f));
+    fineTuneLabel.setJustificationType(juce::Justification::centred);
+    fineTuneLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(fineTuneLabel);
+
     // Create parameter attachments
     auto& apvts = audioProcessor.getAPVTS();
     attackAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "attack", attackSlider);
@@ -176,7 +211,9 @@ PluginEditor::PluginEditor(GliderAudioProcessor& p)
     sampleGainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "sampleGain", sampleGainSlider);
     glideTimeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "glideTime", glideTimeSlider);
     glideStepsAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "glideSteps", glideStepsSlider);
-    
+    transposeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "transpose", transposeSlider);
+    fineTuneAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "finetune", fineTuneSlider);
+
     // Now that all components are created, manually trigger the layout
     logger.log("All components created, manually calling resized()");
     resized();
@@ -193,6 +230,8 @@ PluginEditor::~PluginEditor()
     sampleGainAttachment.reset();
     glideTimeAttachment.reset();
     glideStepsAttachment.reset();
+    transposeAttachment.reset();
+    fineTuneAttachment.reset();
 }
 
 void PluginEditor::paint(juce::Graphics& g)
@@ -207,7 +246,7 @@ void PluginEditor::resized()
 
     auto bounds = getLocalBounds();
     int margin = 20; // Uniform margin between sections
-    int knobSize = 80;
+    int knobSize = 70; // Reduced from 80 to 70 for better fit
     int labelHeight = 20;
     int groupHeight = 140; // Reduced height for more compact layout
 
@@ -258,7 +297,17 @@ void PluginEditor::resized()
     auto glideStepsArea = controlsContentArea.removeFromLeft(knobSize + controlSpacing);
     glideStepsSlider.setBounds(glideStepsArea.removeFromTop(knobSize));
     glideStepsLabel.setBounds(glideStepsSlider.getX(), glideStepsSlider.getBottom() + 5, knobSize, labelHeight);
-    
+
+    // Transpose knob
+    auto transposeArea = controlsContentArea.removeFromLeft(knobSize + controlSpacing);
+    transposeSlider.setBounds(transposeArea.removeFromTop(knobSize));
+    transposeLabel.setBounds(transposeSlider.getX(), transposeSlider.getBottom() + 5, knobSize, labelHeight);
+
+    // Fine Tune knob
+    auto fineTuneArea = controlsContentArea.removeFromLeft(knobSize + controlSpacing);
+    fineTuneSlider.setBounds(fineTuneArea.removeFromTop(knobSize));
+    fineTuneLabel.setBounds(fineTuneSlider.getX(), fineTuneSlider.getBottom() + 5, knobSize, labelHeight);
+
     // ADSR Group controls
     auto adsrControlsArea = adsrArea.reduced(10);
     adsrControlsArea.removeFromTop(15); // Top margin for group title

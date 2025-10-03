@@ -124,6 +124,8 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> sampleGainAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> glideTimeAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> glideStepsAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> transposeAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> fineTuneAttachment;
     
     // ADSR controls
     juce::Slider attackSlider;
@@ -144,7 +146,15 @@ private:
     juce::Label glideTimeLabel;
     juce::Slider glideStepsSlider;
     juce::Label glideStepsLabel;
-    
+
+    // Transpose control
+    juce::Slider transposeSlider;
+    juce::Label transposeLabel;
+
+    // Fine tune control
+    juce::Slider fineTuneSlider;
+    juce::Label fineTuneLabel;
+
     // Sample bank component
     std::unique_ptr<SampleBankComponent> sampleBankComponent;
     

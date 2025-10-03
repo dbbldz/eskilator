@@ -96,7 +96,11 @@ public:
     // Glide controls
     float getGlideTime() const { return parameterManager.getGlideTime(); }
     int getGlideSteps() const { return parameterManager.getGlideSteps(); }
-    
+
+    // Transpose control
+    float getTranspose() const { return parameterManager.getTranspose(); }
+    float getFineTune() const { return parameterManager.getFineTune(); }
+
     // Get current sample rate
     double getSampleRate() const { return currentSampleRate; }
     
