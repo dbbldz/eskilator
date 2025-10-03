@@ -47,16 +47,30 @@ juce::AudioProcessorValueTreeState::ParameterLayout ParameterManager::createPara
     
     // Glide parameter using shared constants
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "glideTime", "Glide Time", 
-        GLIDE_TIME_MIN, 
-        GLIDE_TIME_MAX, 
+        "glideTime", "Glide Time",
+        GLIDE_TIME_MIN,
+        GLIDE_TIME_MAX,
         GLIDE_TIME_DEFAULT));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "glideSteps", "Glide Steps", 
-        GLIDE_STEPS_MIN, 
-        GLIDE_STEPS_MAX, 
+        "glideSteps", "Glide Steps",
+        GLIDE_STEPS_MIN,
+        GLIDE_STEPS_MAX,
         GLIDE_STEPS_DEFAULT));
-    
+
+    // Global transpose parameter using shared constants with discrete steps
+    juce::NormalisableRange<float> transposeRange(TRANSPOSE_MIN, TRANSPOSE_MAX, TRANSPOSE_INCREMENT);
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "transpose", "Transpose",
+        transposeRange,
+        TRANSPOSE_DEFAULT));
+
+    // Fine tune (cents) parameter using shared constants
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "finetune", "Fine Tune",
+        FINETUNE_MIN,
+        FINETUNE_MAX,
+        FINETUNE_DEFAULT));
+
     return { parameters.begin(), parameters.end() };
 }
 
@@ -119,4 +133,20 @@ int ParameterManager::getGlideSteps() const
         return static_cast<int>(param->get());
     }
     return static_cast<int>(GLIDE_STEPS_DEFAULT);
+}
+
+float ParameterManager::getTranspose() const
+{
+    if (auto* param = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("transpose"))) {
+        return param->get();
+    }
+    return TRANSPOSE_DEFAULT;
+}
+
+float ParameterManager::getFineTune() const
+{
+    if (auto* param = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("finetune"))) {
+        return param->get();
+    }
+    return FINETUNE_DEFAULT;
 }

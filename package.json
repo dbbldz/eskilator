@@ -1,0 +1,15 @@
+{
+  "name": "eskilator",
+  "version": "0.9.1",
+  "description": "Gliding monophonic sampler plugin",
+  "author": "Marc Glasser",
+  "license": "MIT",
+  "scripts": {
+    "build": "./build_and_install.sh",
+    "build:standalone": "./build_and_install.sh standalone",
+    "release": "./build_release.sh",
+    "version:patch": "npm version patch --no-git-tag-version",
+    "version:minor": "npm version minor --no-git-tag-version",
+    "version:major": "npm version major --no-git-tag-version"
+  }
+}

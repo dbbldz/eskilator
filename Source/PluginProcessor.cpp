@@ -173,6 +173,9 @@ void GliderAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
                 // Convert MIDI note number to pitch offset (C4 = 60 = 0 semitones)
                 int baseNoteNumber = 60; // Middle C
                 float pitchOffset = static_cast<float>(message.getNoteNumber() - baseNoteNumber);
+                // Apply global transpose and fine tune (cents converted to semitones)
+                pitchOffset += getTranspose();
+                pitchOffset += getFineTune() / 100.0f; // Convert cents to semitones
                 // No pitch limit - allow full MIDI range
                 
                 // MONOPHONIC DESIGN: Always use voice 0, apply crossfade on every note
@@ -561,21 +564,73 @@ void GliderAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
     auto state = parameterManager.getAPVTS().copyState();
     std::unique_ptr<juce::XmlElement> xml(state.createXml());
+
+    // Save sample bank information
+    auto* sampleBankElement = xml->createNewChildElement("SampleBank");
+    int sampleCount = sampleManager.getSampleCount();
+    sampleBankElement->setAttribute("count", sampleCount);
+
+    for (int i = 0; i < sampleCount; ++i)
+    {
+        auto* sampleElement = sampleBankElement->createNewChildElement("Sample");
+        sampleElement->setAttribute("path", sampleManager.getSamplePath(i));
+        sampleElement->setAttribute("name", sampleManager.getSampleName(i));
+        sampleElement->setAttribute("gain", sampleManager.getSampleGain(i));
+        sampleElement->setAttribute("transpose", sampleManager.getSampleTranspose(i));
+    }
+
     copyXmlToBinary(*xml, destData);
 }
 
 void GliderAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     std::unique_ptr<juce::XmlElement> xmlState(getXmlFromBinary(data, sizeInBytes));
-    
+
     if (xmlState.get() != nullptr)
     {
         if (xmlState->hasTagName(parameterManager.getAPVTS().state.getType()))
         {
             parameterManager.getAPVTS().replaceState(juce::ValueTree::fromXml(*xmlState));
         }
+
+        // Restore sample bank information
+        auto* sampleBankElement = xmlState->getChildByName("SampleBank");
+        if (sampleBankElement != nullptr)
+        {
+            // Clear existing samples first
+            sampleManager.clearSampleBank();
+
+            // Load each saved sample
+            for (auto* sampleElement : sampleBankElement->getChildIterator())
+            {
+                juce::String samplePath = sampleElement->getStringAttribute("path");
+
+                // Only load samples that have a valid path and aren't the built-in sample
+                if (samplePath.isNotEmpty() && samplePath != "Built-in")
+                {
+                    juce::File sampleFile(samplePath);
+                    if (sampleFile.existsAsFile())
+                    {
+                        // Load the sample
+                        if (sampleManager.loadSample(sampleFile, currentSampleRate))
+                        {
+                            // Restore per-sample parameters
+                            int index = sampleManager.getSampleCount() - 1; // Just loaded sample is the last one
+                            sampleManager.setSampleGain(index, sampleElement->getDoubleAttribute("gain", 0.0));
+                            sampleManager.setSampleTranspose(index, sampleElement->getDoubleAttribute("transpose", 0.0));
+                        }
+                    }
+                }
+            }
+
+            // If no samples were loaded, load the default sample
+            if (!sampleManager.hasSample())
+            {
+                loadDefaultSample(currentSampleRate);
+            }
+        }
     }
-    
+
     // Call state restored callback if set
     if (onStateRestored)
     {
