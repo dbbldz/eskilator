@@ -14,7 +14,7 @@ echo ""
 RELEASE_BUILD=false
 if [ "$1" = "release" ] || [ "$2" = "release" ]; then
     RELEASE_BUILD=true
-    echo -e "${YELLOW}🏗️  Release build mode: Building universal binary (i386, x86_64, arm64)${NC}"
+    echo -e "${YELLOW}🏗️  Release build mode: Building universal binary (x86_64, arm64)${NC}"
 fi
 
 # Check if build directory exists and has CMake cache, create/configure if not
@@ -23,7 +23,7 @@ if [ ! -d "build" ] || [ ! -f "build/CMakeCache.txt" ]; then
     mkdir -p build
     cd build
     if [ "$RELEASE_BUILD" = true ]; then
-        cmake -DCMAKE_OSX_ARCHITECTURES="i386;x86_64;arm64" ..
+        cmake -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" ..
     else
         cmake ..
     fi
@@ -32,7 +32,7 @@ elif [ "$RELEASE_BUILD" = true ]; then
     # If release build requested but build dir exists, reconfigure
     echo -e "${YELLOW}🔄 Reconfiguring for universal binary build...${NC}"
     cd build
-    cmake -DCMAKE_OSX_ARCHITECTURES="i386;x86_64;arm64" ..
+    cmake -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" ..
     cd ..
 fi
 

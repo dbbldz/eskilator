@@ -7,10 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [0.9.2] - 2025-10-03
 ### Added
 - JUCE framework now properly configured as a git submodule for easier cloning and setup.
-- Universal binary support for macOS (i386, x86_64, arm64) in release builds to support 32-bit Intel, 64-bit Intel, and Apple Silicon Macs.
+- Universal binary support for macOS (x86_64, arm64) in release builds to support Intel and Apple Silicon Macs.
 
 ### Changed
-- Release build script now automatically builds universal binaries with all architecture support.
+- Release build script now automatically builds universal binaries with Intel and Apple Silicon support.
 - Build script supports optional `release` flag to build universal binaries for distribution.
 
 ## [0.9.1] - 2025-10-02
