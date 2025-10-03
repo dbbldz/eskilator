@@ -7,6 +7,24 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+PACKAGE_ONLY=0
+VERSION_OVERRIDE=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --package-only)
+            PACKAGE_ONLY=1
+            shift
+            ;;
+        *)
+            if [ -z "$VERSION_OVERRIDE" ]; then
+                VERSION_OVERRIDE="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
 echo -e "${BLUE}🚀 Building Eskilator Release Package...${NC}"
 echo ""
 
@@ -15,13 +33,13 @@ if [ -f "package.json" ]; then
     VERSION=$(grep '"version"' package.json | head -1 | sed 's/.*"version": "\(.*\)".*/\1/')
     echo -e "${BLUE}Version from package.json: ${VERSION}${NC}"
 
-    if [ -n "$1" ]; then
-        echo -e "${YELLOW}Overriding with command line argument: $1${NC}"
-        VERSION="$1"
+    if [ -n "$VERSION_OVERRIDE" ]; then
+        echo -e "${YELLOW}Overriding with command line argument: $VERSION_OVERRIDE${NC}"
+        VERSION="$VERSION_OVERRIDE"
     fi
 else
     # Get version from user or use default
-    if [ -z "$1" ]; then
+    if [ -z "$VERSION_OVERRIDE" ]; then
         echo -e "${YELLOW}Enter version number (e.g., 1.0.0): ${NC}"
         read VERSION
         if [ -z "$VERSION" ]; then
@@ -29,7 +47,7 @@ else
             echo -e "${YELLOW}Using default version: $VERSION${NC}"
         fi
     else
-        VERSION="$1"
+        VERSION="$VERSION_OVERRIDE"
     fi
 fi
 
@@ -49,24 +67,29 @@ mkdir -p "release/pkg_root/Library/Audio/Plug-Ins/Components"
 mkdir -p "release/pkg_root/Library/Audio/Plug-Ins/VST3"
 
 # Clean build directory for fresh release build
-echo -e "${YELLOW}🧹 Cleaning build directory...${NC}"
-rm -rf build
-mkdir -p build
-cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
-cd ..
+if [ "$PACKAGE_ONLY" -eq 0 ]; then
+    echo -e "${YELLOW}🧹 Cleaning build directory...${NC}"
+    rm -rf build
+    mkdir -p build
+    cd build
+    cmake -DCMAKE_BUILD_TYPE=Release ..
+    cd ..
 
-# Build all targets
-echo -e "${BLUE}🔨 Building all targets...${NC}"
-cmake --build build --config Release --clean-first
+    # Build all targets
+    echo -e "${BLUE}🔨 Building all targets...${NC}"
+    cmake --build build --config Release --clean-first
 
-if [ $? -ne 0 ]; then
-    echo -e "${RED}❌ Build failed!${NC}"
-    exit 1
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}❌ Build failed!${NC}"
+        exit 1
+    fi
+
+    echo -e "${GREEN}✅ Build successful!${NC}"
+    echo ""
+else
+    echo -e "${YELLOW}⏭️  Skipping build; using existing artefacts.${NC}"
+    echo ""
 fi
-
-echo -e "${GREEN}✅ Build successful!${NC}"
-echo ""
 
 # Find built plugins
 ARTEFACTS_DIR="build/Eskilator_artefacts"
@@ -201,11 +224,11 @@ echo -e "${BLUE}📦 Creating installer package (.pkg)...${NC}"
 if security find-identity -v -p basic | grep -q "Developer ID Installer"; then
     INSTALLER_CERT=$(security find-identity -v -p basic | grep "Developer ID Installer" | head -1 | sed 's/.*"\(.*\)"/\1/')
     echo -e "${BLUE}Found installer certificate: $INSTALLER_CERT${NC}"
-    SIGN_PKG="--sign \"Developer ID Installer\""
+    SIGN_PKG=(--sign "$INSTALLER_CERT")
 else
     echo -e "${YELLOW}⚠️  No Developer ID Installer certificate found${NC}"
     echo -e "${YELLOW}Package will be created unsigned${NC}"
-    SIGN_PKG=""
+    SIGN_PKG=()
 fi
 
 # Create the package
@@ -213,7 +236,7 @@ pkgbuild --root "release/pkg_root" \
          --identifier "com.dubbeldutch.eskilator" \
          --version "$VERSION" \
          --install-location "/" \
-         $SIGN_PKG \
+         "${SIGN_PKG[@]}" \
          "release/$PKG_NAME"
 
 if [ $? -ne 0 ]; then
