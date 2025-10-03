@@ -10,12 +10,29 @@ NC='\033[0m' # No Color
 echo -e "${BLUE}🔨 Building and Installing Eskilator Plugin...${NC}"
 echo ""
 
+# Check for release build flag
+RELEASE_BUILD=false
+if [ "$1" = "release" ] || [ "$2" = "release" ]; then
+    RELEASE_BUILD=true
+    echo -e "${YELLOW}🏗️  Release build mode: Building universal binary (x86_64, arm64)${NC}"
+fi
+
 # Check if build directory exists and has CMake cache, create/configure if not
 if [ ! -d "build" ] || [ ! -f "build/CMakeCache.txt" ]; then
     echo -e "${YELLOW}📁 Creating/configuring build directory...${NC}"
     mkdir -p build
     cd build
-    cmake ..
+    if [ "$RELEASE_BUILD" = true ]; then
+        cmake -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" ..
+    else
+        cmake ..
+    fi
+    cd ..
+elif [ "$RELEASE_BUILD" = true ]; then
+    # If release build requested but build dir exists, reconfigure
+    echo -e "${YELLOW}🔄 Reconfiguring for universal binary build...${NC}"
+    cd build
+    cmake -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" ..
     cd ..
 fi
 

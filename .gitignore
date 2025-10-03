@@ -8,9 +8,6 @@ cmake-build-*/
 releases/
 release/
 
-# JUCE framework (should be cloned separately)
-JUCE/
-
 # IDE files
 .vscode/
 .idea/
