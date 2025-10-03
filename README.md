@@ -2,6 +2,8 @@
 
 A monophonic sampler with stepped portamento glide inspired by the KORG Triton.
 
+**Status**: Beta (v0.9.0) - Core features work, some known issues remain. Feedback welcome!
+
 ## Overview
 
 Eskilator is a VST3/AU/Standalone sampler plugin built with JUCE. It recreates the KORG Triton's stepped glide effect - where pitch transitions happen in discrete steps rather than smoothly. Load your own samples and adjust the glide time and step count to dial in the sound.
